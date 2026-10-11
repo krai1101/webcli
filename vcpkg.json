@@ -1,0 +1,23 @@
+{
+  "name": "webcli",
+  "version-string": "0.1.0",
+  "builtin-baseline": "3aea538b2bb21a586502c67b00eb474fdd2e3098",
+  "dependencies": [
+    {
+      "name": "curl",
+      "default-features": false,
+      "features": [
+        "openssl",
+        "http2",
+        "psl"
+      ]
+    },
+    "libpsl",
+    "lexbor",
+    "quickjs-ng",
+    "libuv",
+    "openssl",
+    "icu",
+    "sqlite3"
+  ]
+}

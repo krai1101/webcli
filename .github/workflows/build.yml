@@ -1,0 +1,158 @@
+name: Build and test
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: webcli-build-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  build:
+    name: Build ${{ matrix.label }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            label: Windows x64
+            triplet: x64-windows
+            name: windows-x64
+          - os: ubuntu-22.04
+            label: Linux x64
+            triplet: x64-linux
+            name: linux-x64
+          - os: macos-14
+            label: macOS Apple Silicon
+            triplet: arm64-osx
+            name: macos-arm64
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/.dependencies/cache,readwrite
+      VCPKG_MAX_CONCURRENCY: 2
+      VCPKG_DOWNLOADS: ${{ github.workspace }}/.dependencies/downloads
+      PLATFORM: ${{ matrix.name }}
+      TRIPLET: ${{ matrix.triplet }}
+      RELEASE_REF: ${{ github.ref_name }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.13'
+      - name: Cache dependencies
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            .dependencies/cache
+            .dependencies/downloads
+          key: vcpkg-${{ matrix.name }}-${{ hashFiles('vcpkg.json', 'cmake/triplets/*.cmake') }}
+      - name: Linux prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          sudo apt-get install -y build-essential ninja-build pkg-config autoconf autoconf-archive automake libtool curl zip unzip tar patchelf
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: macOS prerequisites
+        if: runner.os == 'macOS'
+        run: |
+          brew install autoconf autoconf-archive automake libtool
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Bootstrap pinned vcpkg
+        run: |
+          New-Item -ItemType Directory -Force -Path .dependencies/cache, .dependencies/downloads | Out-Null
+          git clone https://github.com/microsoft/vcpkg.git .dependencies/vcpkg
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $baseline = (Get-Content vcpkg.json | ConvertFrom-Json).'builtin-baseline'
+          git -C .dependencies/vcpkg checkout $baseline
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($IsWindows) { & ./.dependencies/vcpkg/bootstrap-vcpkg.bat -disableMetrics }
+          else { & ./.dependencies/vcpkg/bootstrap-vcpkg.sh -disableMetrics }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Configure
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON "-DVCPKG_TARGET_TRIPLET=$env:TRIPLET" "-DVCPKG_OVERLAY_TRIPLETS=$env:GITHUB_WORKSPACE/cmake/triplets" "-DCMAKE_TOOLCHAIN_FILE=$env:GITHUB_WORKSPACE/.dependencies/vcpkg/scripts/buildsystems/vcpkg.cmake"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build and test
+        run: |
+          cmake --build build --config Release --parallel 2
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ctest --test-dir build -C Release --output-on-failure
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Install and package runtime
+        run: |
+          cmake --install build --config Release --prefix "$env:GITHUB_WORKSPACE/build/package"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $base = [regex]::Match((Get-Content CMakeLists.txt -Raw), 'project\(webcli VERSION ([0-9.]+)').Groups[1].Value
+          $version = if ($env:RELEASE_REF.StartsWith('v')) { $env:RELEASE_REF } else { $base }
+          python cmake/package_release.py build/package --vcpkg .dependencies/vcpkg --name "webcli-$version-$env:PLATFORM" --version $version --output dist
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify relocated ZIP
+        run: |
+          python -c "import pathlib,zipfile; z=next(pathlib.Path('dist').glob('*.zip')); zipfile.ZipFile(z).extractall('build/unpacked')"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $folder = Get-ChildItem build/unpacked -Directory | Select-Object -First 1
+          $exe = if ($IsWindows) { Join-Path $folder.FullName 'webcli.exe' } else { Join-Path $folder.FullName 'webcli' }
+          if (!$IsWindows) { chmod +x $exe }
+          python tests/runtime_contracts.py $exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Upload release package
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-${{ matrix.name }}
+          path: dist/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+      - name: Preserve failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: diagnostics-${{ matrix.name }}
+          retention-days: 7
+          path: |
+            build/Testing/Temporary/LastTest.log
+            build/CMakeFiles/CMakeConfigureLog.yaml
+            .dependencies/vcpkg/buildtrees/*/*.log
+  release:
+    name: Publish GitHub Release
+    timeout-minutes: 10
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Download release packages
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+      - name: Publish tested archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" dist/* --clobber
+          else
+            flags=()
+            if [[ "$RELEASE_TAG" == *-* ]]; then flags+=(--prerelease); fi
+            gh release create "$RELEASE_TAG" dist/* --verify-tag --generate-notes "${flags[@]}"
+          fi

@@ -1,0 +1,10 @@
+WebCLI
+Copyright 2026 krai1101
+
+This product includes third-party components and public suffix data.
+See THIRD_PARTY.md and licenses/ for their notices.
+
+The numbered text interaction design and terminal wordmark draw on
+Andy Cufari's WebCLI (https://github.com/andycufari/webcli).
+Copyright (c) 2025 Andy Cufari. MIT License; the full notice is included
+in licenses/andycufari-webcli-MIT.txt.

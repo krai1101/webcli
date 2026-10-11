@@ -1,0 +1,22 @@
+/build/
+/build-*/
+/vcpkg_installed/
+/.vcpkg-registry.git/
+/pagecore/
+/references/
+/.dependencies/
+__pycache__/
+*.py[cod]
+
+# Local planning, review notes and development helpers
+/docs/
+/tools/
+/examples/
+/product.txt
+/AGENTS.md
+/dist/
+/.env
+/.env.*
+*.dmp
+.DS_Store
+Thumbs.db

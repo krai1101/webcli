@@ -1,0 +1,9 @@
+#pragma once
+namespace webcli {
+// Byte arrays avoid compiler string-literal limits without allocating or copying
+// the bootstrap source at runtime. Each source remains NUL terminated.
+inline constexpr unsigned char kWebApiBytes[] = {@WEBCLI_API_SOURCE@0};
+inline constexpr unsigned char kWorkerApiBytes[] = {@WEBCLI_WORKER_API_SOURCE@0};
+inline const char* const kWebApiSource = reinterpret_cast<const char*>(kWebApiBytes);
+inline const char* const kWorkerApiSource = reinterpret_cast<const char*>(kWorkerApiBytes);
+}
