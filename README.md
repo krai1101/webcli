@@ -42,6 +42,23 @@ release workflow for WebCLI.
 
 ## Downloads
 
+Install the latest release without building from source:
+
+**Linux x64 / macOS Apple Silicon:**
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/krai1101/webcli/main/scripts/install.sh | bash
+```
+
+**Windows (PowerShell):**
+
+```powershell
+irm https://raw.githubusercontent.com/krai1101/webcli/main/scripts/install.ps1 | iex
+```
+
+The installers verify the release checksum and install under your user account.
+On Linux/macOS, open a new terminal afterward. Run the same command to update.
+
 Windows x64, Linux x64 and macOS Apple Silicon ZIP packages are published on the
 [Releases page](https://github.com/krai1101/webcli/releases) after all three
 platforms pass the build and package checks.
