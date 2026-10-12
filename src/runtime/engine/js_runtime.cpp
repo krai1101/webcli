@@ -16,6 +16,7 @@
 #include "core/browser_identity.hpp"
 #include "core/errors.hpp"
 #include "core/load_trace.hpp"
+#include "core/runtime_policy.hpp"
 #include "core/script_types.hpp"
 #include "core/serialization/json_string.hpp"
 #include "core/text.hpp"
@@ -35,10 +36,9 @@
 #include "runtime/engine/js_handles.hpp"
 #include "runtime/engine/native_bindings.hpp"
 #include "runtime/engine/script_context.hpp"
-#include "runtime/frames/frame_tree.hpp"
-#include "runtime/workers/worker_manager.hpp"
-#include "runtime/messaging/broadcast_channels.hpp"
 #include "runtime/events/timers.hpp"
+#include "runtime/frames/frame_tree.hpp"
+#include "runtime/messaging/broadcast_channels.hpp"
 #include "runtime/network/blob_urls.hpp"
 #include "runtime/network/completion_delivery.hpp"
 #include "runtime/network/resource_tasks.hpp"
@@ -46,6 +46,7 @@
 #include "runtime/page/lifecycle_delivery.hpp"
 #include "runtime/scripts/module_loader.hpp"
 #include "runtime/scripts/parser_coordinator.hpp"
+#include "runtime/workers/worker_manager.hpp"
 #include "storage/profile_store.hpp"
 
 namespace webcli {
@@ -70,7 +71,8 @@ struct JsRuntime::Impl {
     if (state.cancelled && !owns_runtime) state.cancelled->store(true);
     state.frame_owner.reset();
     state.frame_tree = nullptr;
-    if (state.runtime && owns_runtime) JS_SetHostPromiseRejectionTracker(state.runtime, nullptr, nullptr);
+    if (state.runtime && owns_runtime)
+      JS_SetHostPromiseRejectionTracker(state.runtime, nullptr, nullptr);
     JS_FreeValue(state.context, state.frame_message_delivery);
     state.frame_message_delivery = JS_UNDEFINED;
     clear_promise_rejections(state);
@@ -138,8 +140,10 @@ JsRuntime::JsRuntime(lxb_html_document_t* document, Page& page, StorageStore& st
   if (!frame) s.errors = &page.script_errors;
   s.runtime = frame ? frame->parent->runtime : JS_NewRuntime();
   if (!s.runtime) throw CliError("RUNTIME_INIT", "cannot create QuickJS runtime");
-  // Like Lightpanda without --v8-max-heap-mb, leave sizing to the JS engine.
-  // QuickJS defaults differ from V8; this is not a total process-memory bound.
+  // Frames share their parent's runtime and its configured allocation ceiling.
+  // The default remains engine sizing; this is not a total process-memory bound.
+  if (!frame && runtime_policy().js_heap_bytes)
+    JS_SetMemoryLimit(s.runtime, runtime_policy().js_heap_bytes);
   // The Windows executable reserves 8 MiB, matching the usual Unix main stack.
   // Keep native headroom while allowing ordinary framework tree recursion.
   JS_SetMaxStackSize(s.runtime, kJsStackBytes);
@@ -150,8 +154,9 @@ JsRuntime::JsRuntime(lxb_html_document_t* document, Page& page, StorageStore& st
   if (!s.context) throw CliError("RUNTIME_INIT", "cannot create QuickJS context");
   if (JS_AddIntrinsicDOMException(s.context) < 0)
     throw CliError("RUNTIME_INIT", "cannot initialize DOMException");
-  s.modules = std::make_unique<ModuleLoader>(s.runtime, s.base_url, &s.execution, &s.script_loading,
-                                             &s.referrer_policy, s.cancelled);
+  s.modules = std::make_unique<ModuleLoader>(
+      s.runtime, s.base_url, s.opaque_origin ? "null" : s.security_origin, &s.execution,
+      &s.script_loading, &s.referrer_policy, s.cancelled);
   s.css.css_parser = lxb_css_parser_create();
   s.css.selectors = lxb_selectors_create();
   if (!s.css.css_parser || !s.css.selectors ||
@@ -170,11 +175,16 @@ JsRuntime::JsRuntime(lxb_html_document_t* document, Page& page, StorageStore& st
   install_native_bindings(s.context, global);
   JS_SetPropertyStr(s.context, global, "__webcliCurrentURL",
                     JS_NewString(s.context, page.url.c_str()));
-  JS_SetPropertyStr(s.context, global, "__webcliInheritedBase", JS_NewString(s.context, s.base_url.c_str()));
-  JS_SetPropertyStr(s.context, global, "__webcliUserAgent", JS_NewString(s.context, kUserAgent.c_str()));
-  JS_SetPropertyStr(s.context, global, "__webcliBrowserBrand", JS_NewString(s.context, kBrowserBrand));
-  JS_SetPropertyStr(s.context, global, "__webcliBrowserMajorVersion", JS_NewString(s.context, kBrowserMajorVersion));
-  JS_SetPropertyStr(s.context, global, "__webcliBrowserVersion", JS_NewString(s.context, kBrowserVersion));
+  JS_SetPropertyStr(s.context, global, "__webcliInheritedBase",
+                    JS_NewString(s.context, s.base_url.c_str()));
+  JS_SetPropertyStr(s.context, global, "__webcliUserAgent",
+                    JS_NewString(s.context, kUserAgent.c_str()));
+  JS_SetPropertyStr(s.context, global, "__webcliBrowserBrand",
+                    JS_NewString(s.context, kBrowserBrand));
+  JS_SetPropertyStr(s.context, global, "__webcliBrowserMajorVersion",
+                    JS_NewString(s.context, kBrowserMajorVersion));
+  JS_SetPropertyStr(s.context, global, "__webcliBrowserVersion",
+                    JS_NewString(s.context, kBrowserVersion));
 #if defined(_WIN32)
   constexpr const char* platform = "Win32";
 #elif defined(__APPLE__)
@@ -201,13 +211,16 @@ JsRuntime::JsRuntime(lxb_html_document_t* document, Page& page, StorageStore& st
                     std::to_string(kDesktopViewportWidth) +
                     ",height:" + std::to_string(kDesktopViewportHeight) + "});",
                 "webcli:limits"))
-    throw CliError("RUNTIME_INIT", "cannot initialize runtime limits: " +
-      (s.errors && !s.errors->empty() ? s.errors->back() : std::string("unknown error")));
+    throw CliError(
+        "RUNTIME_INIT",
+        "cannot initialize runtime limits: " +
+            (s.errors && !s.errors->empty() ? s.errors->back() : std::string("unknown error")));
   trace.mark("limits");
   if (!evaluate(kWebApiSource, "webcli:web-api"))
-    throw CliError("RUNTIME_INIT", "WebCLI Web API initialization failed: " +
-                                       (s.errors && !s.errors->empty() ? s.errors->back()
-                                                                     : std::string("unknown error")));
+    throw CliError(
+        "RUNTIME_INIT",
+        "WebCLI Web API initialization failed: " +
+            (s.errors && !s.errors->empty() ? s.errors->back() : std::string("unknown error")));
   trace.mark("bootstrap");
   s.frame_message_delivery = JS_GetPropertyStr(s.context, global, "__webcliDeliverFrameMessage");
   parse_live_document(*this, s, page, html);

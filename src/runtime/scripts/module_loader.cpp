@@ -34,7 +34,7 @@ void ModuleLoader::preload_dependencies(const std::string& source, const std::st
   for (const auto& specifier : module_requests(source, id, *execution_)) {
     const auto url = import_map_.resolve(specifier, base);
     if (url == id || compiled_.count(url) || sources_.count(url)) continue;
-    contexts_.remember(url, url, {base, policy});
+    contexts_.remember(url, url, {base, policy}, true, parent && parent->credentials);
     preload(url);
   }
 }
@@ -43,9 +43,12 @@ void ModuleLoader::preload(const std::string& url) {
   HttpRequest request;
   request.url = url;
   request.owner_cancelled = cancelled_;
-  request.cookie_origin = base_url_;
   contexts_.remember(url, url, {base_url_, *referrer_policy_});
   const auto* environment = contexts_.find(url);
+  request.fetch_origin = security_origin_;
+  request.fetch_mode = "cors";
+  request.fetch_credentials = environment->credentials;
+  request.cookie_origin = environment->credentials ? "" : security_origin_;
   request.referrer_source = environment->request.source;
   request.referrer_policy = environment->request.policy;
   request.max_body_bytes = kMaxScriptBytes;
@@ -111,8 +114,8 @@ bool ModuleLoader::has_pending_sources() const {
   });
 }
 void ModuleLoader::remember_script(const std::string& id, const std::string& base,
-                                   NavigationReferrer referrer, bool module) {
-  contexts_.remember(id, base, std::move(referrer), module);
+                                   NavigationReferrer referrer, bool module, bool credentials) {
+  contexts_.remember(id, base, std::move(referrer), module, credentials);
 }
 void ModuleLoader::received_script(const std::string& id, const HttpResponse& response) {
   const auto policy = response.headers.find("referrer-policy");
@@ -121,14 +124,16 @@ void ModuleLoader::received_script(const std::string& id, const HttpResponse& re
     const auto* environment = contexts_.find(id);
     if (environment && environment->module)
       contexts_.remember(response.url, response.url, {"", environment->request.policy},
-                         environment->module);
+                         environment->module, environment->credentials);
   }
   contexts_.dispatched(id);
 }
-ModuleLoader::ModuleLoader(JSRuntime* runtime, std::string base_url, ExecutionBudget* execution,
-                           ScriptLoading* loading, const std::string* referrer_policy,
+ModuleLoader::ModuleLoader(JSRuntime* runtime, std::string base_url, std::string security_origin,
+                           ExecutionBudget* execution, ScriptLoading* loading,
+                           const std::string* referrer_policy,
                            std::shared_ptr<std::atomic<bool>> cancelled)
     : base_url_(std::move(base_url)),
+      security_origin_(security_origin.empty() ? "null" : std::move(security_origin)),
       referrer_policy_(referrer_policy),
       loading_(loading),
       execution_(execution),
@@ -149,7 +154,8 @@ char* ModuleLoader::normalize(JSContext* context, const char* base, const char* 
             : loader.base_url_;
     const auto url = loader.import_map_.resolve(name, importing_url);
     loader.contexts_.remember(
-        url, url, {importing_url, parent ? parent->request.policy : *loader.referrer_policy_});
+        url, url, {importing_url, parent ? parent->request.policy : *loader.referrer_policy_}, true,
+        parent && parent->module && parent->credentials);
     auto* result = static_cast<char*>(js_malloc(context, url.size() + 1));
     if (result) std::memcpy(result, url.c_str(), url.size() + 1);
     return result;

@@ -8,6 +8,7 @@
 #include "cli/instance.hpp"
 #include "cli/output/format.hpp"
 #include "core/errors.hpp"
+#include "core/runtime_policy.hpp"
 #include "host/resident.hpp"
 #include "network/cookie_store.hpp"
 #include "network/http_handles.hpp"
@@ -21,9 +22,7 @@
 #endif
 namespace {
 struct CurlGlobal {
-  CurlGlobal() {
-    webcli::initialize_http_transport();
-  }
+  CurlGlobal() { webcli::initialize_http_transport(); }
   ~CurlGlobal() {
     webcli::shutdown_resource_service();
     webcli::shutdown_http_handles();
@@ -69,6 +68,7 @@ int main(int argc, char** argv) {
 #endif
   bool json = std::find(tokens.begin(), tokens.end(), "--json") != tokens.end();
   try {
+    (void)webcli::runtime_policy();
     CurlGlobal curl;
     if (tokens.size() == 1 && tokens[0] == "--worker") return webcli::serve_browser();
     if (tokens.size() == 1 && tokens[0] == "--version") {

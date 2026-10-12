@@ -17,9 +17,9 @@ const ModuleContext* ModuleContexts::find(const std::string& id) const {
   return entry == entries_.end() ? nullptr : &entry->second;
 }
 void ModuleContexts::remember(const std::string& id, std::string base, NavigationReferrer request,
-                              bool module) {
+                              bool module, bool credentials) {
   if (entries_.count(id)) return;
-  ModuleContext value{std::move(base), std::move(request), module};
+  ModuleContext value{std::move(base), std::move(request), module, credentials};
   const auto size = charge(value) + id.size();
   if (size > max_bytes - bytes_)
     throw CliError("SCRIPT_QUOTA", "script environment metadata exceeds document limits");

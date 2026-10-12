@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.21)
 if(POLICY CMP0207)
   cmake_policy(SET CMP0207 NEW)
 endif()
-project(webcli VERSION 0.1.0 LANGUAGES CXX)
+project(webcli VERSION 0.1.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -47,6 +47,7 @@ add_executable(webcli
   src/cli/prompt.cpp
   src/cli/terminal.cpp
   src/core/text.cpp
+  src/core/runtime_policy.cpp
   src/core/serialization/json_string.cpp
   src/runtime/page/engine_request.cpp
   src/runtime/page/browsing_instance.cpp
@@ -105,6 +106,7 @@ add_executable(webcli
   src/network/public_suffix.cpp
   src/network/cors.cpp
   src/network/http_client.cpp
+  src/network/destination_policy.cpp
   src/network/referrer.cpp
   src/runtime/network/referrer_policy.cpp
   src/network/resource_service.cpp
@@ -137,7 +139,7 @@ configure_file(src/runtime/embedded_scripts.hpp.in generated/runtime/embedded_sc
 target_include_directories(webcli PRIVATE src "${CMAKE_CURRENT_BINARY_DIR}/generated" "${WEBCLI_PSL_INCLUDE_DIR}")
 if(WIN32)
   target_compile_definitions(webcli PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
-  target_link_libraries(webcli PRIVATE advapi32 shell32)
+  target_link_libraries(webcli PRIVATE advapi32 shell32 ws2_32)
 endif()
 target_link_libraries(webcli PRIVATE unofficial::sqlite3::sqlite3 CURL::libcurl ${WEBCLI_PSL_LIBRARY} ${WEBCLI_LEXBOR_TARGET} qjs Threads::Threads OpenSSL::Crypto ICU::uc ICU::i18n
   $<IF:$<TARGET_EXISTS:libuv::uv_a>,libuv::uv_a,libuv::uv>)

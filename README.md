@@ -102,6 +102,16 @@ Browsing commands return one JSON object per line without a banner or prompt.
 `help` returns plain text.
 Separate terminals have independent pages but share saved cookies and storage.
 
+Optional engine settings can be supplied through environment variables before
+starting WebCLI:
+
+| Variable | Effect |
+| --- | --- |
+| `WEBCLI_BLOCK_PRIVATE_NETWORKS=1` | Block connections to loopback, private and link-local IP addresses. Uses direct connections, ignoring proxy settings. Default: off. |
+| `WEBCLI_JS_MAX_HEAP_MB=512` | Set a QuickJS allocation limit in MiB per runtime, including dedicated workers and module compilation. Frames share their parent's runtime. Unset or `0`: engine default. |
+
+The heap setting does not limit native DOM allocations or total process memory.
+
 ## Supported scope
 
 WebCLI implements a subset of browser APIs for text browsing and forms. Some

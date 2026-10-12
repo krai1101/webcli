@@ -14,6 +14,7 @@
 
 #include "cli/output/format.hpp"
 #include "core/errors.hpp"
+#include "core/runtime_policy.hpp"
 #include "host/instance_worker.hpp"
 #include "runtime/page/browsing_instance.hpp"
 #include "storage/profile_store.hpp"
@@ -97,11 +98,10 @@ std::string endpoint() {
                             std::filesystem::last_write_time(executable).time_since_epoch())
                             .count();
   const auto build =
-      std::to_string(std::filesystem::file_size(executable)) + ":" +
-      std::to_string(modified);
+      std::to_string(std::filesystem::file_size(executable)) + ":" + std::to_string(modified);
   // A freshly built executable must not reconnect to a worker running old code.
-  const auto id = hash_string(executable + ":" + build) + "-" + hash_string(user_identity()) + "-" +
-                  hash_string(profile_directory().string());
+  const auto id = hash_string(executable + ":" + build + ":" + runtime_policy().identity()) + "-" +
+                  hash_string(user_identity()) + "-" + hash_string(profile_directory().string());
 #ifdef _WIN32
   return "\\\\.\\pipe\\webcli-v2-" + id;
 #else
@@ -435,8 +435,9 @@ Response send_request(const Request& request) {
       spawned = false;
     } else {
       if (result.written)
-        throw CliError("ACTION_OUTCOME_UNKNOWN",
-                       "browser worker disconnected after receiving the command; observe before retrying");
+        throw CliError(
+            "ACTION_OUTCOME_UNKNOWN",
+            "browser worker disconnected after receiving the command; observe before retrying");
       if (result.code != UV_ENOENT && result.code != UV_ECONNREFUSED)
         throw CliError("IPC_CONNECT", uv_strerror(result.code), true);
       if (request.command == "close")
@@ -444,7 +445,8 @@ Response send_request(const Request& request) {
       if (!spawned) {
 #ifndef _WIN32
         struct stat status{};
-        if (lstat(path.c_str(), &status) == 0 && S_ISSOCK(status.st_mode) && status.st_uid == getuid())
+        if (lstat(path.c_str(), &status) == 0 && S_ISSOCK(status.st_mode) &&
+            status.st_uid == getuid())
           unlink(path.c_str());
 #endif
         spawn_worker();

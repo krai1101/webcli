@@ -8,6 +8,15 @@
 
 namespace webcli {
 enum class ScriptKind { Data, Classic, Module };
+inline bool script_uses_credentials(std::string_view value) {
+  constexpr std::string_view expected = "use-credentials";
+  if (value.size() != expected.size()) return false;
+  for (std::size_t i = 0; i < value.size(); ++i) {
+    const auto character = value[i] >= 'A' && value[i] <= 'Z' ? value[i] + ('a' - 'A') : value[i];
+    if (character != expected[i]) return false;
+  }
+  return true;
+}
 inline std::string script_type_essence(std::string value) {
   const auto separator = value.find(';');
   if (separator != std::string::npos) value.resize(separator);

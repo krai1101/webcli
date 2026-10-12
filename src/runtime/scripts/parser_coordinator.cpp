@@ -11,6 +11,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "core/script_types.hpp"
 #include "runtime/dom/dom_bindings.hpp"
 #include "runtime/dom/dom_helpers.hpp"
 #include "runtime/dom/tree_usage.hpp"
@@ -202,8 +203,9 @@ class ParserCoordinator {
     if (defer) {
       if (script.module && !script.url.empty()) {
         try {
-          state_.modules->remember_script(script.url, script.url,
-                                          {page_.url, script.referrer_policy});
+          state_.modules->remember_script(
+              script.url, script.url, {page_.url, script.referrer_policy}, true,
+              script_uses_credentials(attr(script.node, "crossorigin")));
           state_.modules->preload(script.url);
         } catch (const std::exception& error) {
           script.failure = error.what();

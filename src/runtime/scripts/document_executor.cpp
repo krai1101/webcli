@@ -139,7 +139,8 @@ void execute_document_scripts(JsRuntime& runtime, ScriptContext& s, Page& page,
                         : script.module ? script.url
                                         : classic_script_id(script.url, script_id);
     s.modules->remember_script(origin, script.url.empty() ? script.base_url : script.url,
-                               {"", script.referrer_policy}, script.module);
+                               {"", script.referrer_policy}, script.module,
+                               script_uses_credentials(attr(script.node, "crossorigin")));
     if (script.module) {
       s.error_context = origin;
       if (!begin_js_task(&s)) {

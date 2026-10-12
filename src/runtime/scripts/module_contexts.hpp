@@ -12,12 +12,14 @@ struct ModuleContext {
   std::string base_url;
   NavigationReferrer request;
   bool module = true;
+  bool credentials = false;
 };
 // Metadata belongs to the document owner, never to a transport thread.
 class ModuleContexts {
  public:
   const ModuleContext* find(const std::string&) const;
-  void remember(const std::string& id, std::string base, NavigationReferrer, bool module = true);
+  void remember(const std::string& id, std::string base, NavigationReferrer, bool module = true,
+                bool credentials = false);
   void received(const std::string& id, const std::string& final_url, const std::string& policy);
   void dispatched(const std::string& id);
 

@@ -19,7 +19,8 @@ namespace webcli {
 // URL-based modules share document loading deadlines and transport policy.
 class ModuleLoader {
  public:
-  ModuleLoader(JSRuntime*, std::string base_url, ExecutionBudget* execution, ScriptLoading* loading,
+  ModuleLoader(JSRuntime*, std::string base_url, std::string security_origin,
+               ExecutionBudget* execution, ScriptLoading* loading,
                const std::string* referrer_policy,
                std::shared_ptr<std::atomic<bool>> cancelled = {});
   JSValue evaluate(JSContext*, const std::string& source, const std::string& url);
@@ -30,7 +31,7 @@ class ModuleLoader {
   std::string source(const std::string& url);
   bool has_pending_sources() const;
   void remember_script(const std::string& id, const std::string& base, NavigationReferrer referrer,
-                       bool module = true);
+                       bool module = true, bool credentials = false);
   void received_script(const std::string& id, const HttpResponse& response);
   void finish_initial_loading() { initial_loading_ = false; }
   void begin_turn() {
@@ -39,6 +40,7 @@ class ModuleLoader {
 
  private:
   std::string base_url_;
+  std::string security_origin_;
   const std::string* referrer_policy_;
   ImportMap import_map_;
   ModuleContexts contexts_;

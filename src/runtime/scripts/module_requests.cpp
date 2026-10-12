@@ -8,6 +8,7 @@
 
 #include "core/errors.hpp"
 #include "core/resource_limits.hpp"
+#include "core/runtime_policy.hpp"
 #include "runtime/engine/execution_budget.hpp"
 #include "runtime/engine/js_handles.hpp"
 
@@ -52,6 +53,8 @@ std::vector<std::string> module_requests(const std::string& source, const std::s
   const std::unique_ptr<JSRuntime, decltype(&JS_FreeRuntime)> runtime(JS_NewRuntime(),
                                                                       JS_FreeRuntime);
   if (!runtime) throw CliError("RUNTIME_INIT", "cannot allocate module discovery runtime");
+  if (runtime_policy().js_heap_bytes)
+    JS_SetMemoryLimit(runtime.get(), runtime_policy().js_heap_bytes);
   JS_SetMaxStackSize(runtime.get(), kJsStackBytes);
   JS_SetInterruptHandler(runtime.get(), interrupt, &budget);
   Requests requests;

@@ -1,6 +1,7 @@
 #include <chrono>
 
 #include "core/browser_identity.hpp"
+#include "core/runtime_policy.hpp"
 #include "network/http_client.hpp"
 #include "runtime/crypto/aes_gcm_bindings.hpp"
 #include "runtime/crypto/digest_bindings.hpp"
@@ -12,6 +13,7 @@
 #include "runtime/events/timers.hpp"
 #include "runtime/intl/number_format_bindings.hpp"
 #include "runtime/intl/segmenter_bindings.hpp"
+#include "runtime/messaging/broadcast_channels.hpp"
 #include "runtime/navigation/history_clone_bindings.hpp"
 #include "runtime/network/blob_urls.hpp"
 #include "runtime/network/completion_delivery.hpp"
@@ -19,7 +21,6 @@
 #include "runtime/network/web_bindings.hpp"
 #include "runtime/url/url_bindings.hpp"
 #include "runtime/workers/worker_manager.hpp"
-#include "runtime/messaging/broadcast_channels.hpp"
 namespace webcli {
 namespace {
 int interrupt_worker(JSRuntime*, void* opaque) {
@@ -80,6 +81,8 @@ class WorkerRealm {
   void initialize(WorkerChannel& channel) {
     state.runtime = JS_NewRuntime();
     if (!state.runtime) throw CliError("WORKER_INIT", "cannot create worker runtime");
+    if (runtime_policy().js_heap_bytes)
+      JS_SetMemoryLimit(state.runtime, runtime_policy().js_heap_bytes);
     JS_SetMaxStackSize(state.runtime, kJsStackBytes);
     JS_SetInterruptHandler(state.runtime, interrupt_worker, &state);
     state.context = JS_NewContext(state.runtime);
@@ -87,9 +90,9 @@ class WorkerRealm {
       throw CliError("WORKER_INIT", "cannot create worker context");
     JS_SetContextOpaque(state.context, &state);
     JS_SetHostPromiseRejectionTracker(state.runtime, promise_rejection_tracker, nullptr);
-    state.modules = std::make_unique<ModuleLoader>(state.runtime, state.base_url, &state.execution,
-                                                   &state.script_loading, &state.referrer_policy,
-                                                   state.cancelled);
+    state.modules = std::make_unique<ModuleLoader>(
+        state.runtime, state.base_url, state.security_origin, &state.execution,
+        &state.script_loading, &state.referrer_policy, state.cancelled);
     install_segmenter_class(state.context);
     install_number_format_class(state.context);
     JsValueOwner global(state.context, JS_GetGlobalObject(state.context));
@@ -100,7 +103,7 @@ class WorkerRealm {
     };
     const Binding bindings[] = {
         {"__webcliBroadcast", guarded_binding<js_broadcast_channel>, 3},
-      {"__webcliWorker", guarded_binding<js_worker_access>, 4},
+        {"__webcliWorker", guarded_binding<js_worker_access>, 4},
         {"__webcliURLParse", guarded_binding<js_url_parse>, 4},
         {"__webcliSegmenter", guarded_binding<js_segmenter>, 4},
         {"__webcliNumberFormat", guarded_binding<js_number_format>, 3},

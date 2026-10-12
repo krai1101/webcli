@@ -17,6 +17,7 @@
 #include "network/cookie_store.hpp"
 #include "network/cors.hpp"
 #include "network/data_script.hpp"
+#include "network/destination_policy.hpp"
 #include "network/http_handles.hpp"
 #include "network/referrer.hpp"
 
@@ -159,6 +160,8 @@ static HttpResponse perform_http_transfer(const HttpRequest& request, bool& requ
     Transfer transfer{{}, &request};
     char error[CURL_ERROR_SIZE]{};
     auto* c = curl.get();
+    DestinationPolicy destination;
+    destination.attach(c);
     const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
                                deadline - std::chrono::steady_clock::now())
                                .count();
@@ -241,6 +244,9 @@ static HttpResponse perform_http_transfer(const HttpRequest& request, bool& requ
     transfer.response.request_referrer = referrer;
     transfer.response.request_referrer_policy = referrer_policy;
     if (code != CURLE_OK) {
+      if (destination.blocked())
+        throw CliError("PRIVATE_NETWORK_BLOCKED",
+                       "private-network connection blocked by configuration");
       if (transfer.too_large)
         throw CliError("RESPONSE_TOO_LARGE", transfer.headers_too_large
                                                  ? "response headers exceed the 1048576-byte limit"

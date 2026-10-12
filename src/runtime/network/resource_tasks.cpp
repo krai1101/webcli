@@ -34,7 +34,9 @@ HttpResponse load_resource(const HttpRequest& request, bool script) {
   return response;
 }
 }  // namespace
-HttpResponse load_script_resource(const HttpRequest& request) { return load_resource(request, true); }
+HttpResponse load_script_resource(const HttpRequest& request) {
+  return load_resource(request, true);
+}
 void start_queued_http(ScriptContext& state) {
   std::size_t active = 0;
   for (const auto& job : state.network.fetches)
@@ -118,12 +120,20 @@ JSValue js_native_script_load(JSContext* context, JSValueConst, int argc, JSValu
   request.max_body_bytes = kMaxScriptBytes;
   auto* node = argc > 1 ? dom_node_arg(context, argv[1]) : nullptr;
   const bool module = node && script_kind(attr(node, "type")) == ScriptKind::Module;
+  const bool credentials = module && script_uses_credentials(attr(node, "crossorigin"));
+  if (module) {
+    request.fetch_origin =
+        state.opaque_origin || state.security_origin.empty() ? "null" : state.security_origin;
+    request.fetch_mode = "cors";
+    request.fetch_credentials = credentials;
+    request.cookie_origin = credentials ? "" : request.fetch_origin;
+  }
   const auto identity =
       module ? *url : classic_script_id(*url, node ? dom_node_id(&state, node) : -1);
   if (!module && node)
     state.classic_script_contexts.insert_or_assign(dom_node_id(&state, node), identity);
   state.modules->remember_script(identity, *url, {request.referrer_source, request.referrer_policy},
-                                 module);
+                                 module, credentials);
   request.timeout_ms = kScriptRequestTimeoutMs;
   request.cancelled = std::make_shared<std::atomic<bool>>(false);
   auto promise = enqueue_http(state, std::move(request), true);
