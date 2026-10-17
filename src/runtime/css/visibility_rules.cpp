@@ -5,15 +5,17 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <regex>
 #include <tuple>
 #include <unordered_set>
 
 #include "core/errors.hpp"
 #include "core/text.hpp"
-#include "runtime/dom/dom_helpers.hpp"
 #include "runtime/css/viewport.hpp"
+#include "runtime/dom/dom_helpers.hpp"
 namespace webcli {
 namespace {
 std::string lower(std::string text) {
@@ -27,9 +29,18 @@ struct Declaration {
 };
 struct Rule {
   std::string selector;
-  Declaration display, visibility;
+  Declaration display, visibility, opacity;
 };
-void declarations(const std::string& source, Declaration& display, Declaration& visibility) {
+bool numeric_opacity(const std::string& value) {
+  if (value.empty() || value.find_first_not_of("0123456789.+-eE%") != std::string::npos)
+    return false;
+  char* end = nullptr;
+  const auto number = std::strtod(value.c_str(), &end);
+  return end != value.c_str() && std::isfinite(number) &&
+         (*end == '\0' || (*end == '%' && end[1] == '\0'));
+}
+void declarations(const std::string& source, Declaration& display, Declaration& visibility,
+                  Declaration& opacity) {
   static const std::unordered_set<std::string> displays = {"none",
                                                            "contents",
                                                            "block",
@@ -72,8 +83,11 @@ void declarations(const std::string& source, Declaration& display, Declaration& 
       }
       Declaration* target = name == "display"      ? &display
                             : name == "visibility" ? &visibility
+                            : name == "opacity"    ? &opacity
                                                    : nullptr;
-      bool valid = name == "display"
+      bool valid = name == "opacity" ? numeric_opacity(value) || value == "inherit" ||
+                                           value == "initial" || value == "unset"
+                   : name == "display"
                        ? displays.count(value) > 0
                        : value == "visible" || value == "hidden" || value == "collapse" ||
                              value == "inherit" || value == "initial" || value == "unset";
@@ -81,6 +95,40 @@ void declarations(const std::string& source, Declaration& display, Declaration& 
     }
     if (end == std::string::npos) break;
     at = end + 1;
+  }
+}
+bool media_range_matches(const std::string& clause) {
+  static const std::string operand = R"((width|height|(?:\d+(?:\.\d+)?|\.\d+)(?:px|em|rem)))";
+  static const std::regex range("^\\(\\s*" + operand + R"(\s*(<=|>=|<|>|=)\s*)" + operand +
+                                R"((?:\s*(<=|>=|<|>|=)\s*)" + operand + R"()?\s*\)$)");
+  std::smatch match;
+  if (!std::regex_match(clause, match, range)) return false;
+  const auto dimension = [](const std::string& token) {
+    return token == "width" || token == "height";
+  };
+  const bool chained = match[4].matched;
+  if (chained ? (!dimension(match[3]) || dimension(match[1]) || dimension(match[5]) ||
+                 match[2].str()[0] != match[4].str()[0] || match[2] == "=")
+              : dimension(match[1]) == dimension(match[3]))
+    return false;
+  const auto pixels = [](const std::string& token) {
+    if (token == "width") return double(kDesktopViewportWidth);
+    if (token == "height") return double(kDesktopViewportHeight);
+    return std::stod(token) *
+           (token.size() >= 2 && token.substr(token.size() - 2) == "px" ? 1 : 16);
+  };
+  const auto compare = [](double left, const std::string& op, double right) {
+    return op == "<"    ? left < right
+           : op == "<=" ? left <= right
+           : op == ">"  ? left > right
+           : op == ">=" ? left >= right
+                        : left == right;
+  };
+  try {
+    return compare(pixels(match[1]), match[2], pixels(match[3])) &&
+           (!chained || compare(pixels(match[3]), match[4], pixels(match[5])));
+  } catch (const std::exception&) {
+    return false;
   }
 }
 bool media_matches(std::string query) {
@@ -107,7 +155,7 @@ bool media_matches(std::string query) {
       auto clause = trim(part.substr(0, and_at));
       std::smatch found;
       if (!std::regex_match(clause, found, feature))
-        matches = false;
+        matches &= media_range_matches(clause);
       else {
         const auto name = found[1].str(), value = trim(found[2].str());
         std::smatch size;
@@ -122,9 +170,8 @@ bool media_matches(std::string query) {
             } catch (...) {
               matches = false;
             }
-            const auto actual = name.find("width") != std::string::npos
-                                    ? kDesktopViewportWidth
-                                    : kDesktopViewportHeight;
+            const auto actual = name.find("width") != std::string::npos ? kDesktopViewportWidth
+                                                                        : kDesktopViewportHeight;
             matches &= name.rfind("min-", 0) == 0   ? actual >= pixels
                        : name.rfind("max-", 0) == 0 ? actual <= pixels
                                                     : actual == pixels;
@@ -133,7 +180,9 @@ bool media_matches(std::string query) {
           matches &= (name == "prefers-color-scheme" && value == "light") ||
                      (name == "prefers-reduced-motion" && value == "reduce") ||
                      (name == "orientation" && value == "landscape") ||
-                     (name == "hover" && value == "none");
+                     ((name == "hover" || name == "any-hover" || name == "pointer" ||
+                       name == "any-pointer") &&
+                      value == "none");
       }
       if (and_at == std::string::npos) break;
       part = trim(part.substr(and_at + 5));
@@ -229,8 +278,9 @@ void parse_rules(const std::string& source, std::vector<Rule>& rules, bool& trun
                body.find('{') == std::string::npos) {
       Rule rule;
       rule.selector = header;
-      declarations(body, rule.display, rule.visibility);
-      if (!rule.display.value.empty() || !rule.visibility.value.empty())
+      declarations(body, rule.display, rule.visibility, rule.opacity);
+      if (!rule.display.value.empty() || !rule.visibility.value.empty() ||
+          !rule.opacity.value.empty())
         rules.push_back(std::move(rule));
     }
     at = end;
@@ -239,7 +289,7 @@ void parse_rules(const std::string& source, std::vector<Rule>& rules, bool& trun
 using Priority = std::tuple<bool, std::uint64_t, std::size_t>;
 struct Cascaded {
   VisibilityValue value;
-  Priority display{}, visibility{};
+  Priority display{}, visibility{}, opacity{};
 };
 struct Cascade {
   std::unordered_map<lxb_dom_node_t*, Cascaded> nodes;
@@ -256,6 +306,7 @@ struct Cascade {
     };
     set(rule->display, result.value.display, result.display);
     set(rule->visibility, result.value.visibility, result.visibility);
+    set(rule->opacity, result.value.opacity, result.opacity);
   }
 };
 lxb_status_t match(lxb_dom_node_t* node, lxb_css_selector_specificity_t specificity,
@@ -314,9 +365,11 @@ VisibilityValues stylesheet_visibility(lxb_dom_node_t* scope,
   }
   for (auto* node : nodes) {
     Rule inline_rule;
-    declarations(without_comments(attr(node, "style")), inline_rule.display,
-                 inline_rule.visibility);
-    if (inline_rule.display.value.empty() && inline_rule.visibility.value.empty()) continue;
+    declarations(without_comments(attr(node, "style")), inline_rule.display, inline_rule.visibility,
+                 inline_rule.opacity);
+    if (inline_rule.display.value.empty() && inline_rule.visibility.value.empty() &&
+        inline_rule.opacity.value.empty())
+      continue;
     cascade.rule = &inline_rule;
     ++cascade.order;
     cascade.apply(node, std::uint64_t{1} << 32);
@@ -340,6 +393,7 @@ std::string visibility_css_source(const std::string& source, bool& truncated) {
     };
     append("display", rule.display);
     append("visibility", rule.visibility);
+    append("opacity", rule.opacity);
     result += "}";
   }
   return result;
@@ -351,6 +405,15 @@ bool stylesheet_display_none(lxb_dom_node_t* node, const VisibilityValues& value
 bool stylesheet_invisible(lxb_dom_node_t* node, const VisibilityValues& values,
                           const std::function<lxb_dom_node_t*(lxb_dom_node_t*)>& parent) {
   if (node && node->type != LXB_DOM_NODE_TYPE_ELEMENT) node = parent(node);
+  // Opacity composites the entire subtree: a descendant's opacity:1 cannot
+  // undo a fully transparent ancestor. Text observations omit unpainted content.
+  // This is separate from inherited visibility, which descendants can override.
+  for (auto* ancestor = node; ancestor; ancestor = parent(ancestor)) {
+    const auto found = values.find(ancestor);
+    if (found != values.end() && numeric_opacity(found->second.opacity) &&
+        std::strtod(found->second.opacity.c_str(), nullptr) <= 0)
+      return true;
+  }
   for (; node; node = parent(node)) {
     auto found = values.find(node);
     if (found == values.end()) continue;

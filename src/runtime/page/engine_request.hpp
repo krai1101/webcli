@@ -3,7 +3,7 @@
 #include <string>
 
 namespace webcli {
-enum class BrowserAction { Open, Observe, Click, Fill, Select, Keyboard, Wait };
+enum class BrowserAction { Open, Observe, Click, Fill, Select, Keyboard, Wait, Back, Forward };
 enum class WaitCondition { Idle, Text, Gone, Reference, Selector };
 
 // Engine inputs contain browsing semantics, never terminal/IPC/output options.

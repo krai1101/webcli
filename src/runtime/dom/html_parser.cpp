@@ -45,6 +45,8 @@ struct ParsedDocumentOwner {
     };
     erase_owned(dom.selected_options);
     erase_owned(dom.textarea_values);
+    erase_owned(dom.modal_dialogs);
+    erase_owned(dom.parser_form_owners);
     erase_owned(dom.shadow_roots);
     erase_owned(dom.shadow_hosts);
     erase_owned(dom.assigned_slots);

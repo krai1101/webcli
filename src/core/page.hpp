@@ -18,6 +18,7 @@ struct Button {
   int node_id = -1;
   std::string role = "button";
   bool selected = false;
+  bool outside_modal = false;  // A nonvisual backdrop action, not page markup.
   int frame_id = 0;
 };
 struct Field {
@@ -37,6 +38,10 @@ struct Form {
 struct ContentBlock {
   std::string kind, text, ref;
 };
+struct DiagnosticEntry {
+  double elapsed_ms = 0;
+  std::string category, message;
+};
 struct Page {
   long http_status = 0;
   bool access_challenge = false;  // Explicit response header evidence only.
@@ -53,6 +58,12 @@ struct Page {
   std::size_t observation_offset = 0;
   std::vector<std::string> script_errors;
   std::size_t human_errors_reported = 0;  // Full diagnostics remain in JSON and the log.
+  std::vector<DiagnosticEntry> diagnostic_trace;
+  std::size_t diagnostic_dropped = 0;
+  std::size_t pending_requests = 0, pending_timers = 0, pending_modules = 0;
+  bool pending_microtasks = false;
+  mutable std::size_t diagnostic_logged = 0;
+  mutable bool diagnostic_log_failed = false;
   bool truncated = false;
 };
 }  // namespace webcli

@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.21)
 if(POLICY CMP0207)
   cmake_policy(SET CMP0207 NEW)
 endif()
-project(webcli VERSION 0.1.1 LANGUAGES CXX)
+project(webcli VERSION 0.1.2 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -31,7 +31,13 @@ find_package(OpenSSL 3 REQUIRED COMPONENTS Crypto)
 find_package(ICU REQUIRED COMPONENTS uc i18n)
 find_package(unofficial-sqlite3 CONFIG REQUIRED)
 
+add_subdirectory(cmake/wasm)
+
 add_executable(webcli
+  src/runtime/wasm/bindings.cpp
+  src/runtime/wasm/allocation.cpp
+  src/runtime/wasm/objects.cpp
+  src/runtime/wasm/calls.cpp
   src/runtime/workers/worker_manager.cpp
   src/runtime/workers/worker_realm.cpp
   src/runtime/workers/worker_bindings.cpp
@@ -81,6 +87,7 @@ add_executable(webcli
   src/runtime/dom/node_clone.cpp
   src/runtime/dom/node_adoption.cpp
   src/runtime/messaging/broadcast_channels.cpp
+  src/runtime/messaging/message_ports.cpp
   src/runtime/dom/markup.cpp
   src/runtime/dom/controls.cpp
   src/runtime/network/blob_urls.cpp
@@ -106,6 +113,7 @@ add_executable(webcli
   src/network/public_suffix.cpp
   src/network/cors.cpp
   src/network/http_client.cpp
+  src/network/fetch_metadata.cpp
   src/network/destination_policy.cpp
   src/network/referrer.cpp
   src/runtime/network/referrer_policy.cpp
@@ -114,12 +122,23 @@ add_executable(webcli
   src/network/data_script.cpp
   src/cli/output/format.cpp
   src/observation/semantic_extractor.cpp
+  src/observation/reference_resolver.cpp
   src/observation/accessible_name.cpp
   src/observation/content_projection.cpp
   src/storage/profile_store.cpp
   src/storage/diagnostic_log.cpp
 )
 include(cmake/WebApiSources.cmake)
+
+# Opt-in harness for unchanged upstream tests. Never enabled in release builds.
+option(WEBCLI_UPSTREAM_TEST_DRIVER "Build the upstream test driver instead of the CLI" OFF)
+if(WEBCLI_UPSTREAM_TEST_DRIVER)
+  get_target_property(WEBCLI_TEST_SOURCES webcli SOURCES)
+  list(REMOVE_ITEM WEBCLI_TEST_SOURCES src/main.cpp)
+  set_property(TARGET webcli PROPERTY SOURCES ${WEBCLI_TEST_SOURCES} tests/upstream/driver.cpp)
+  target_compile_definitions(webcli PRIVATE WEBCLI_UPSTREAM_TEST_DRIVER)
+  set_target_properties(webcli PROPERTIES OUTPUT_NAME webcli-upstream-driver)
+endif()
 target_compile_definitions(webcli PRIVATE WEBCLI_VERSION="${PROJECT_VERSION}")
 set(WEBCLI_API_SOURCE "")
 foreach(API_FILE IN LISTS WEBCLI_WEB_API_SOURCES)
@@ -141,7 +160,7 @@ if(WIN32)
   target_compile_definitions(webcli PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
   target_link_libraries(webcli PRIVATE advapi32 shell32 ws2_32)
 endif()
-target_link_libraries(webcli PRIVATE unofficial::sqlite3::sqlite3 CURL::libcurl ${WEBCLI_PSL_LIBRARY} ${WEBCLI_LEXBOR_TARGET} qjs Threads::Threads OpenSSL::Crypto ICU::uc ICU::i18n
+target_link_libraries(webcli PRIVATE webcli_wasm unofficial::sqlite3::sqlite3 CURL::libcurl ${WEBCLI_PSL_LIBRARY} ${WEBCLI_LEXBOR_TARGET} qjs Threads::Threads OpenSSL::Crypto ICU::uc ICU::i18n
   $<IF:$<TARGET_EXISTS:libuv::uv_a>,libuv::uv_a,libuv::uv>)
 
 include(CTest)
@@ -152,6 +171,9 @@ if(BUILD_TESTING)
   add_test(NAME webcli_public_suffix COMMAND webcli_suffix_tests)
   set_tests_properties(webcli_public_suffix PROPERTIES TIMEOUT 10)
   find_package(Python3 COMPONENTS Interpreter REQUIRED)
+  add_test(NAME webcli_wasm_contracts
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/wasm_contracts.py $<TARGET_FILE:webcli>)
+  set_tests_properties(webcli_wasm_contracts PROPERTIES TIMEOUT 45)
   add_test(NAME webcli_runtime_contracts
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/runtime_contracts.py $<TARGET_FILE:webcli>)
   set_tests_properties(webcli_runtime_contracts PROPERTIES TIMEOUT 180)
@@ -164,6 +186,15 @@ if(BUILD_TESTING)
   add_test(NAME webcli_diagnostic_rotation
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/diagnostic_rotation.py $<TARGET_FILE:webcli>)
   set_tests_properties(webcli_diagnostic_rotation PROPERTIES TIMEOUT 45)
+  add_test(NAME webcli_runtime_diagnostics
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/runtime_diagnostics.py $<TARGET_FILE:webcli>)
+  set_tests_properties(webcli_runtime_diagnostics PROPERTIES TIMEOUT 45)
+  add_test(NAME webcli_blazedemo_workflow
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/blazedemo_workflow.py $<TARGET_FILE:webcli>)
+  set_tests_properties(webcli_blazedemo_workflow PROPERTIES TIMEOUT 45)
+  add_test(NAME webcli_history_workflow
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/history_workflow.py $<TARGET_FILE:webcli>)
+  set_tests_properties(webcli_history_workflow PROPERTIES TIMEOUT 45)
 endif()
 
 if(MSVC)

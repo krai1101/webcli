@@ -63,11 +63,31 @@ void render(const Page& page, const Request& request, std::ostream& out) {
     text += block.text;
     if (!block.ref.empty()) refs.insert(block.ref);
   }
+  if (request.debug) {
+    try {
+      append_runtime_trace_log(page);
+      page.diagnostic_log_failed = false;
+    } catch (...) {
+      page.diagnostic_log_failed = true;
+    }
+  }
   if (!request.json) {
     out << "URL: " << page.url << "\nTITLE: " << page.title << "\n\n";
-    if (request.debug)
+    if (request.debug) {
       out << "Diagnostics: document " << page.document_id << " | HTTP " << page.http_status
-          << " | retained JavaScript warnings " << page.script_errors.size() << "\n\n";
+          << " | retained JavaScript warnings " << page.script_errors.size() << '\n';
+      out << "Pending document work: requests=" << page.pending_requests
+          << " timers=" << page.pending_timers << " modules=" << page.pending_modules
+          << " microtasks=" << (page.pending_microtasks ? "yes" : "no") << '\n';
+      out << "Recent runtime activity (URLs exclude query strings; no headers or bodies):\n";
+      if (page.diagnostic_dropped)
+        out << "  " << page.diagnostic_dropped << " older entries discarded\n";
+      for (const auto& event : page.diagnostic_trace)
+        out << "  +" << event.elapsed_ms << "ms " << event.category << ": " << event.message
+            << '\n';
+      if (page.diagnostic_log_failed) out << "  Diagnostic log could not be written\n";
+      out << '\n';
+    }
     for (auto i = begin; i < end; ++i) {
       const auto& b = page.content[i];
       if (!b.ref.empty())
@@ -193,10 +213,22 @@ void render(const Page& page, const Request& request, std::ostream& out) {
   for (std::size_t i = 0; i < page.script_errors.size(); ++i)
     out << (i ? "," : "") << json_escape(page.script_errors[i]);
   out << ']';
-  if (request.debug)
+  if (request.debug) {
     out << ",\"diagnostics\":{\"enabled\":true,\"warningCount\":" << page.script_errors.size()
         << ",\"logPath\":" << json_escape((diagnostic_directory() / "runtime.jsonl").string())
-        << '}';
+        << ",\"logWriteFailed\":" << (page.diagnostic_log_failed ? "true" : "false")
+        << ",\"pending\":{\"requests\":" << page.pending_requests
+        << ",\"timers\":" << page.pending_timers << ",\"modules\":" << page.pending_modules
+        << ",\"microtasks\":" << (page.pending_microtasks ? "true" : "false") << "}"
+        << ",\"droppedEntries\":" << page.diagnostic_dropped << ",\"trace\":[";
+    for (std::size_t i = 0; i < page.diagnostic_trace.size(); ++i) {
+      const auto& event = page.diagnostic_trace[i];
+      out << (i ? "," : "") << "{\"elapsedMs\":" << event.elapsed_ms
+          << ",\"category\":" << json_escape(event.category)
+          << ",\"message\":" << json_escape(event.message) << '}';
+    }
+    out << "]}";
+  }
   out << "}\n";
 }
 void render_error(std::ostream& out, bool json, const std::string& code, const std::string& message,

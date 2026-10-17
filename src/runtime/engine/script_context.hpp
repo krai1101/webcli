@@ -4,6 +4,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <deque>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -28,9 +29,11 @@
 #include "storage/profile_store.hpp"
 
 namespace webcli {
+struct WasmScope;
 class FrameTree;
 class WorkerManager;
 class BroadcastChannels;
+class MessagePorts;
 struct JsTimer;
 struct PendingRejection {
   JSValue promise, reason;
@@ -42,8 +45,10 @@ struct PendingModule {
   bool blocks_content_loaded = true;
 };
 struct ScriptContext : std::enable_shared_from_this<ScriptContext> {
+  std::shared_ptr<WasmScope> wasm;
   std::shared_ptr<WorkerManager> workers;
   std::shared_ptr<BroadcastChannels> broadcasts;
+  std::shared_ptr<MessagePorts> ports;
   void* worker_channel = nullptr;
   FrameTree* frame_tree = nullptr;
   std::shared_ptr<FrameTree> frame_owner;
@@ -51,6 +56,7 @@ struct ScriptContext : std::enable_shared_from_this<ScriptContext> {
   int frame_id = 0;
   std::string security_origin;
   bool opaque_origin = false;
+  bool secure_context = false;
   bool scripting_allowed = true;
   std::string referrer_policy;
   std::string document_referrer;
@@ -93,6 +99,8 @@ struct ScriptContext : std::enable_shared_from_this<ScriptContext> {
   std::unique_ptr<IndexedDbStore> indexed_db;
   std::vector<PendingModule> pending_modules;
   std::vector<PendingRejection> rejections;
+  std::deque<DiagnosticEntry> diagnostic_trace;
+  std::size_t diagnostic_dropped = 0;
 };
 struct JsTimer {
   TaskScheduler::TaskId task = 0;

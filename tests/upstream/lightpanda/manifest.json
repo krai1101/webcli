@@ -1,0 +1,25 @@
+{
+  "repository": "https://github.com/lightpanda-io/demo",
+  "commit": "24aaecefc5ced8896aaed9d3846e3049f96f93f8",
+  "files": {
+    "LICENSE": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+    "agent/golden/amiibo.json": "d74bf7f10593a71b861d562c7e2411a2998a0c7757c1fe024907c480e00a3286",
+    "agent/golden/campfire.json": "f74ae922b811e24af348c35739e15190e4d0b0aeba308a2895d45ccdb3b6648b",
+    "agent/golden/checked.json": "20bdb042a9452e5d3e68fcd7c0ac2d500c1afc8458eb08e7d49c11fceba5ddb7",
+    "agent/golden/cookies.json": "00913150036bee97486e5803093914a1893f9153993ba139ef686befe1e3042f",
+    "agent/golden/dynamic.json": "e762d4b5b9d92e457f2ccf6c0f48b786426b916d26ba5b3dee9740d87c80b163",
+    "agent/golden/form.json": "5503c5f932b4433c086927e177d3050ed9880dd6ab1d132ba1af9d2fc09caf7e",
+    "agent/golden/magic8ball.json": "af395f2eced27d64ffbb50930fe21b206175f132ce8dd754543ae0fd0f79b9c0",
+    "agent/golden/redirects.json": "b7be54112ebac132c43fc77bd1334214dac6489231be39fb5b3b02fc8580c504",
+    "agent/scripts/amiibo.js": "050014d148e128ea036e708566a7bf58c35eb2c272791a5cd14d5631dd967228",
+    "agent/scripts/campfire.js": "9c1d7ab91755320338d84dcdacef883b1d74826adc306d8b85147f6c3dc51896",
+    "agent/scripts/checked.js": "a1b948d829931dc046acf6e98db1c750bd42ce3a6ea5a57a04162c8701a6e463",
+    "agent/scripts/cookies.js": "8a305ec445bce4a02a52477a268339da6e10b5c36ca77987281b9ae9597d1885",
+    "agent/scripts/dynamic.js": "8d91cfd04fd8d1bc7764120508dcdb92a9407da9170df4bc618217c835127d44",
+    "agent/scripts/form.js": "4ac0aebeeb03add2cd9c5a8dffbddc060626be00c3fb8098e59062349f11d1f9",
+    "agent/scripts/magic8ball.js": "99336f6e7ecd4f4f1392c96bc92197d70002a5a5b19a028920d45a0a1b654e95",
+    "agent/scripts/redirects.js": "ad55c0843df66342cef204b8aa84b03ee8561fcc2d2893d7b9891fab0296515f",
+    "runner/go.mod": "867b4cc033780d97573e5c79852af0445975e4788df03ff325c977a3022ba9f3",
+    "runner/main.go": "b0f15ab6c934c09947dec3e6485419bf2195864b689705b927c4766328e07a67"
+  }
+}

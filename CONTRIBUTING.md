@@ -102,7 +102,79 @@ There is one product executable; engine/CLI separation is in code.
 - `src/storage/`: profile persistence and diagnostics.
 - `src/core/`: shared types, text and URL utilities.
 
-`cmake/` contains build/packaging support; `tests/` contains offline fixtures.
+`cmake/` contains build/packaging support; `tests/` contains offline fixtures
+and an optional public SPA regression.
+
+### Public SPA regression
+
+Run `python tests/public_spa.py /path/to/webcli` with internet access. This
+exercises the public TodoMVC React app twice: create tasks, toggle completion,
+filter Active/Completed without reloading the document, clear completed tasks,
+and reopen. It uses a temporary profile and never modifies your saved login.
+The current React demo does not persist tasks, so this checks reopening rather
+than localStorage persistence. External availability can affect this test;
+offline engine checks remain the default CI gate.
+Run `python tests/public_demos.py /path/to/webcli` to exercise RealWorld and
+React-admin. Append `realworld` or `react-admin` to select one scenario. RealWorld
+checks feed/article/profile navigation, tag filtering and login/register form
+editing without submitting credentials or creating accounts. React-admin checks
+demo login, customer search/detail views and product/order navigation; it never
+saves edits. Both use temporary profiles and fail on missing APIs or warnings.
+The React-admin scenario checks demo login, customer search and navigation to
+customer detail, poster and order views. It does not save customer changes or
+place orders. A completed run establishes only the assertions in that scenario.
+
+Run `python tests/public_modals.py /path/to/webcli` to open and dismiss the
+Chrome native-dialog sample and Bootstrap's JavaScript modal. It checks modal
+background isolation, Close, outside dismissal, Escape and reopening, including
+the static modal's refusal to dismiss on outside clicks or Escape. It follows
+observation pagination to find the live controls on the documentation page.
+Keyboard checks use `wait idle` to let the page finish its dismissal transition.
+Append `x` to check X's public onboarding modal instead: one synthetic email
+fill followed by Continue must reveal the modal in the click response, conceal
+the background and allow the outside action to dismiss it.
+It does not submit the modal's login form or verify email delivery or authentication.
+Offline dialog checks also cover form completion, input editing, cancellation,
+`closedby`, stacked opening order, custom visibility and popover activation in
+`tests/engine_cycle.py`.
+Native focus checks cover initial autofocus, background focus blocking,
+Tab/Shift+Tab wrapping and cancellation, nested restoration, and nonmodal close
+restoration in `tests/runtime_contracts.py`. The engine-cycle workflow also sends
+Tab and Shift+Tab through the actual CLI.
+
+Outside activation is a nonvisual, virtual action: it selects an empty presentation backdrop,
+otherwise a dialog wrapper with a registered pointer/mouse-down handler, or the
+containing element. It dispatches one input sequence and leaves dismissal to
+the page and preserves focus for its dismissal/restoration handlers. It cannot
+promise accurate hit testing for arbitrary overlay layouts. Native gestures
+still apply the ordinary mousedown focus default to actual page controls.
+
+Manual workflow dispatches can enable the public regressions to run these
+checks against the unpacked release on all three platforms. Known
+compatibility failures fail that optional job; they are not skipped.
+
+Run `python tests/lightpanda_demos.py /path/to/webcli` for Lightpanda's public
+Campfire Commerce, Amiibo and Magic 8-Ball demos. These check asynchronously
+loaded product/review data, quantity editing, three document navigations, and
+repeated iframe/worker replies through both button clicks and Enter. Expected
+product and Amiibo data are read independently from the demos' public JSON.
+Append `campfire`, `amiibo` or `oracle` to run one workflow. No purchases or
+account operations are performed. These checks also run in the optional public
+regression job; external availability can cause failures.
+
+Offline checks additionally cover repeated parent/iframe observation updates,
+event capture/target/bubble order, listener reentrancy and immediate propagation
+stopping. Public workflows supplement those deterministic regressions.
+
+### Unchanged upstream demo tests
+
+The eight original Lightpanda demo PandaScripts and their exact golden JSON
+results are retained separately from our public CLI workflows. See
+[the upstream test instructions](tests/upstream/README.md) for the pinned
+fixture checkout and optional test-driver build. These use the original local
+fixture server, preserve upstream assertions and fail on result differences.
+The test-only driver and Go server are not product dependencies or release
+artifacts. They are opt-in and do not add another build to the release jobs.
 
 ## Release workflow
 

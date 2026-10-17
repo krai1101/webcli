@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace webcli {
 struct ScriptContext;
@@ -17,6 +18,7 @@ struct FrameEnvironment {
   std::string origin, base;
   bool opaque = false;
   bool scripts = true;
+  std::string name;
 };
 // One frame tree per top-level document. Only the engine thread touches realms;
 // background workers return response data and never hold JavaScript values.
@@ -33,12 +35,19 @@ class FrameTree {
   void pump();
   void cancel_workers();
   bool pending() const;
+  bool ready_work_pending() const;
   bool matches(const std::string& selector) const;
   ScriptContext* state(int) const;
   JsRuntime* runtime(int) const;
   std::uint64_t generation(int) const;
   std::uint64_t observation_revision() const;
   int parent(int) const;
+  int top(int) const;
+  int opener(int) const;
+  std::vector<int> popups() const;
+  int open_popup(ScriptContext&, const std::string& url, const std::string& name, bool no_opener,
+                 bool no_referrer);
+  void close_popup(int);
   lxb_dom_node_t* element(int) const;
   int child(int, int) const;
   int count(int) const;

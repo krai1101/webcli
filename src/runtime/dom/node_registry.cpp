@@ -88,7 +88,20 @@ JSValue js_dom_text_set(JSContext* context, JSValueConst, int argc, JSValueConst
                                      : 0);
   // Detached nodes remain owned by the document: wrappers must never dangle.
   if (node->type == LXB_DOM_NODE_TYPE_ELEMENT || node->type == LXB_DOM_NODE_TYPE_DOCUMENT_FRAGMENT)
-    while (auto* child = lxb_dom_node_first_child(node)) lxb_dom_node_remove(child);
+    while (auto* child = lxb_dom_node_first_child(node)) {
+      reset_parser_form_owners(*state, child);
+      lxb_dom_node_remove(child);
+    }
+  if (node->type == LXB_DOM_NODE_TYPE_TEXT || node->type == LXB_DOM_NODE_TYPE_COMMENT ||
+      node->type == LXB_DOM_NODE_TYPE_PROCESSING_INSTRUCTION) {
+    auto& data = lxb_dom_interface_character_data(node)->data;
+    const auto length = std::strlen(text);
+    // Lexbor 3.0.1's character-data replacement grows only when capacity <
+    // length, then writes a terminator at length. Equality also needs growth.
+    if (data.data && lexbor_str_size(&data) <= length &&
+        !lexbor_str_realloc(&data, node->owner_document->text, length + 1))
+      return JS_ThrowOutOfMemory(context);
+  }
   const auto status = lxb_dom_node_text_content_set(node, reinterpret_cast<const lxb_char_t*>(text),
                                                     std::strlen(text));
 

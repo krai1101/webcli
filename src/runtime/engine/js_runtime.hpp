@@ -32,6 +32,9 @@ class JsRuntime {
   void resume();
   // Network settling excludes recurring timers and unresolved JS promises.
   bool network_pending() const;
+  // Ready work can still initiate navigation or requests after a time slice.
+  // Future timers and unresolved promises are excluded.
+  bool ready_work_pending() const;
   bool matches(const std::string& selector);
   void sync(Page&);
   std::string document_base_url() const;

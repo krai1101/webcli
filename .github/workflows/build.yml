@@ -4,6 +4,11 @@ on:
     tags: ['v*']
   pull_request:
   workflow_dispatch:
+    inputs:
+      public_spa:
+        description: Run public SPA and modal regressions
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -105,6 +110,26 @@ jobs:
           $exe = if ($IsWindows) { Join-Path $folder.FullName 'webcli.exe' } else { Join-Path $folder.FullName 'webcli' }
           if (!$IsWindows) { chmod +x $exe }
           python tests/runtime_contracts.py $exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tests/runtime_diagnostics.py $exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tests/blazedemo_workflow.py $exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Test public SPA
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.public_spa }}
+        shell: pwsh
+        run: |
+          $folder = Get-ChildItem build/unpacked -Directory | Select-Object -First 1
+          $exe = if ($IsWindows) { Join-Path $folder.FullName 'webcli.exe' } else { Join-Path $folder.FullName 'webcli' }
+          python tests/public_spa.py $exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tests/public_demos.py $exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tests/lightpanda_demos.py $exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tests/public_modals.py $exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tests/public_modals.py $exe x
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Upload release package
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

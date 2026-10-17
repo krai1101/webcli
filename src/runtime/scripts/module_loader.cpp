@@ -42,6 +42,7 @@ void ModuleLoader::preload(const std::string& url) {
   if (url.rfind("blob:", 0) == 0 || is_data_script_url(url) || sources_.count(url)) return;
   HttpRequest request;
   request.url = url;
+  request.destination = "script";
   request.owner_cancelled = cancelled_;
   contexts_.remember(url, url, {base_url_, *referrer_policy_});
   const auto* environment = contexts_.find(url);

@@ -34,7 +34,7 @@ release workflow for WebCLI.
 ## Features
 
 - Readable page content with actionable references and pagination.
-- Navigation, form filling, selection and Enter/Escape keyboard interaction.
+- Navigation, form filling, selection and keyboard interaction.
 - JavaScript, modules, events and asynchronous page updates.
 - Saved cookies and website storage.
 - Independent live pages in separate terminals.
@@ -75,6 +75,9 @@ Run `webcli` to start the interactive prompt:
 
 ```text
 webcli> open https://www.python.org
+webcli> open https://docs.python.org/3/
+webcli> back
+webcli> forward
 webcli> observe
 webcli> help
 webcli> quit
@@ -84,16 +87,51 @@ webcli> quit
 | --- | --- |
 | `open <url>` | Navigate to a page |
 | `observe` | Read the live page without reloading |
-| `click <ref>` | Activate a link or button |
+| `click <ref>` | Activate a link or button and return the resulting page |
 | `fill <I-ref> <value>` | Fill a field; quote values containing spaces |
 | `select <S-ref> <value>` | Choose an option by its value |
-| `keyboard <ref> Enter\|Escape` | Send a key to a control |
+| `keyboard <ref> <key>` | Send Enter, Escape, Tab or Shift+Tab to a control |
 | `wait [idle\|text\|gone\|ref\|selector] [value]` | Wait for a condition |
+| `back` / `forward` | Move through history and show the resulting page |
+
+For checkboxes and radios, `fill <I-ref> true|false` sets the desired checked
+state through normal activation. An already-matching state is unchanged;
+canceled activation reports an error. A checked radio cannot be cleared directly.
+
+`back` and `forward` return the resulting page and support website history
+changes such as SPA routes and URL fragments. At either end of history, the
+current page is returned unchanged. Both commands are available at the prompt
+and as terminal commands, for example `webcli back --json`.
+If no page is open, they return `NO_PAGE`.
+
+`open` waits for the normal document load lifecycle, with a 25-second deadline.
+Pages can continue changing afterward. If a referenced node is replaced, WebCLI
+can recover a unique matching control in the same document and frame; links
+must also retain their destination URL. Ambiguous or changed targets stay stale.
+Internal processing and failed waits preserve the last returned reference
+descriptions. A successful observation replaces them; use its current refs.
+Reference numbers are not reused across navigation within a live instance.
+
+`click` waits for document load and 500 ms without pending network or runnable
+JavaScript work before
+returning page text. The idle window follows Lightpanda and agent-browser;
+automatic waiting after clicks is WebCLI's CLI behavior. The total readiness
+deadline is 25 seconds. A timeout does not undo or retry the click; use `observe`
+before acting again. Pages can schedule later updates or poll indefinitely, so
+use `wait text "expected text"` when a workflow requires a specific result.
+Interactions resolve their targets after already-runnable page tasks finish;
+this avoids filling a control that queued hydration is about to replace. Future
+timers and unresolved promises do not block this check.
 
 References identify links (`L1`), buttons (`B1`), inputs (`I1`) and selects
 (`S1`). Use the references returned by the current page. Follow the displayed
 `More: observe ...` command to read the rest of a long page. `help` shows full
-syntax; `observe --debug` shows detailed warnings. `observe --offset 0` includes
+syntax; `observe --debug` shows recent action/event delivery, document fetch/XHR
+results, pending work and JavaScript errors. Its trace retains the latest 128
+metadata entries and writes new entries to the rotating diagnostic log when
+requested. Request headers, bodies and URL query strings are excluded from this
+trace; unchanged DOM output does not establish that a remote action failed.
+`observe --offset 0` includes
 header/navigation content. `close` closes the current page; `quit` exits the
 prompt. Saved cookies and storage remain.
 
@@ -101,6 +139,7 @@ For agents, start `webcli --json` and send one command per input line.
 Browsing commands return one JSON object per line without a banner or prompt.
 `help` returns plain text.
 Separate terminals have independent pages but share saved cookies and storage.
+Website requests and JavaScript use a Chrome-compatible browser identity.
 
 Optional engine settings can be supplied through environment variables before
 starting WebCLI:
@@ -119,6 +158,35 @@ JavaScript applications remain unsupported. It has no graphical renderer,
 canvas rendering or file uploads. Sites may require verification or deny
 access; loading a sign-in page does not establish login compatibility.
 
+Default readable/writable streams, transform callbacks and stream piping are
+supported. Byte-stream/BYOB readers and transferable streams are unsupported.
+`FileList` and empty `input.files` collections support form-library checks;
+local file selection and uploads remain unsupported.
+
+Script-opened windows appear in `observe` with a `Window:` heading and use the
+same control references. Message channels support cloned messages and port
+transfer between iframe/window realms; worker transfers and nested transfer
+lists remain unsupported. Form validity supports required values, email/URL,
+patterns, numeric bounds and custom errors; it is not full constraint validation.
+Element measurements are estimates for nonvisual page logic, not rendered layout.
+
+Native dialogs support opening, closing, Escape close requests, stacked opening
+order and local `method="dialog"` form completion. Close requests respect
+`closedby` and cancellation. Custom dialogs use the page's JavaScript and supported CSS visibility;
+hidden or `aria-hidden` content is omitted. Popover controls expose their open
+content. Within each document, native modal focus remains within the top modal: initial autofocus,
+Tab/Shift+Tab cycling and focus restoration on close are supported. Tab's native
+default traversal currently applies to native modal dialogs; other pages can
+handle the key in JavaScript. Graphical layout is not implemented.
+
+While a native modal or visible ARIA modal is open, observation shows its content
+and controls instead of the underlying page. Its `Outside dialog` button ref
+sends an outside interaction to the containing DOM surface while preserving
+focus for the page's dismissal/restoration handlers. The page decides whether
+that dismisses a custom modal. Native dialogs dismiss this way only with
+`closedby="any"`, subject to their cancel handler. This is nonvisual interaction,
+not coordinate-based backdrop hit testing.
+
 ## Build from source
 
 WebCLI requires a C++17 compiler, CMake 3.21+, Python 3.9+ and vcpkg.
@@ -126,6 +194,11 @@ Dependencies include Lexbor, QuickJS-NG, libcurl, libuv, libpsl, ICU and SQLite.
 
 For Windows, Linux and macOS setup, build commands and testing, see
 [CONTRIBUTING.md](CONTRIBUTING.md#build-from-source).
+
+WebAssembly uses a WAMR interpreter. Function imports and exported memory,
+tables and globals are supported; importing memory, tables or globals is not.
+WASI, SIMD and shared-memory threads are unsupported. Geometry and hit testing
+use nonvisual estimates and do not provide pixel-accurate CSS layout.
 
 ## Contributing
 

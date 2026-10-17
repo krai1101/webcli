@@ -11,13 +11,19 @@ globalThis.getComputedStyle = function(node) {
   if (!(node instanceof DomNode) || node.nodeType !== 1) throw new TypeError('getComputedStyle requires an element');
   if (__computedStyles.has(node)) return __computedStyles.get(node);
   const value = property => {
-    if (property === 'display' || property === 'visibility') {
-      const cascaded = __webcliComputedVisibility(node.__id, property === 'visibility');
+    if (property === 'display' || property === 'visibility' || property === 'opacity') {
+      const cascaded = __webcliComputedVisibility(node.__id,
+          property === 'opacity' ? 2 : property === 'visibility' ? 1 : 0);
+      if (property === 'opacity' && cascaded && !['inherit','initial','unset'].includes(cascaded)) {
+        const number = parseFloat(cascaded) / (cascaded.endsWith('%') ? 100 : 1);
+        return String(Math.min(1, Math.max(0, number)));
+      }
       if (cascaded && !['inherit','initial','unset'].includes(cascaded)) return cascaded;
-      if (cascaded === 'initial') return property === 'display' ? 'inline' : 'visible';
+      if (cascaded === 'initial' || cascaded === 'unset' && property === 'opacity')
+        return property === 'display' ? 'inline' : __styleDefaults[property];
       if (cascaded === 'inherit' || cascaded === 'unset' && property === 'visibility')
         return node.parentElement ? getComputedStyle(node.parentElement)[property] :
-          property === 'display' ? 'inline' : 'visible';
+          property === 'display' ? 'inline' : __styleDefaults[property];
     }
     const inline = node.style.getPropertyValue(property);
     if (inline) return inline;

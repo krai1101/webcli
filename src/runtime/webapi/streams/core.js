@@ -1,6 +1,7 @@
 // Stream bookkeeping is private to a document, on its JavaScript owner thread.
 const __streams = (() => {
-  const readable = new WeakMap(), readers = new WeakMap(), controllers = new WeakMap();
+  const readable = new WeakMap(), readers = new WeakMap(), controllers = new WeakMap(),
+        writable = new WeakMap(), writers = new WeakMap();
   const token = Symbol('stream constructor');
   const deferred = () => {
     let resolve, reject;
@@ -36,5 +37,5 @@ const __streams = (() => {
       throw new TypeError(name + ' must be callable');
     return fn ? fn.bind(owner) : () => undefined;
   };
-  return {readable, readers, controllers, token, deferred, get, strategy, chunkSize, callback};
+  return {readable, readers, controllers, writable, writers, token, deferred, get, strategy, chunkSize, callback};
 })();

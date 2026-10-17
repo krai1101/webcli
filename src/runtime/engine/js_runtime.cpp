@@ -1,3 +1,4 @@
+#include "runtime/wasm/bindings.hpp"
 #include "runtime/engine/js_runtime.hpp"
 
 #include <curl/curl.h>
@@ -22,6 +23,7 @@
 #include "core/text.hpp"
 #include "core/url/url.hpp"
 #include "network/data_script.hpp"
+#include "network/fetch_metadata.hpp"
 #include "network/http_client.hpp"
 #include "runtime/css/style_resolver.hpp"
 #include "runtime/css/stylesheet_bindings.hpp"
@@ -39,6 +41,7 @@
 #include "runtime/events/timers.hpp"
 #include "runtime/frames/frame_tree.hpp"
 #include "runtime/messaging/broadcast_channels.hpp"
+#include "runtime/messaging/message_ports.hpp"
 #include "runtime/network/blob_urls.hpp"
 #include "runtime/network/completion_delivery.hpp"
 #include "runtime/network/resource_tasks.hpp"
@@ -87,6 +90,7 @@ struct JsRuntime::Impl {
       delete item.second;
     }
     state.scheduler.clear();
+    state.ports.reset();
     state.broadcasts.reset();
     state.indexed_db.reset();
     if (state.css.selectors) lxb_selectors_destroy(state.css.selectors, true);
@@ -94,6 +98,7 @@ struct JsRuntime::Impl {
       lxb_css_parser_selectors_destroy(state.css.css_parser);
       lxb_css_parser_destroy(state.css.css_parser, true);
     }
+    shutdown_wasm(state);
     if (state.context) JS_FreeContext(state.context);
     if (state.runtime && owns_runtime) {
       JS_RunGC(state.runtime);
@@ -117,6 +122,9 @@ JsRuntime::JsRuntime(lxb_html_document_t* document, Page& page, StorageStore& st
   s.document_referrer = page.document_referrer;
   s.history_source_url = page.url;
   s.security_origin = frame ? frame->origin : url_origin(page.url);
+  s.secure_context =
+      potentially_trustworthy_url(s.security_origin) &&
+      (!frame || frame->tree->parent(frame->id) == frame->id || frame->parent->secure_context);
   if (frame) {
     impl_->owns_runtime = false;
     s.frame_id = frame->id;
@@ -185,6 +193,11 @@ JsRuntime::JsRuntime(lxb_html_document_t* document, Page& page, StorageStore& st
                     JS_NewString(s.context, kBrowserMajorVersion));
   JS_SetPropertyStr(s.context, global, "__webcliBrowserVersion",
                     JS_NewString(s.context, kBrowserVersion));
+  JS_SetPropertyStr(s.context, global, "__webcliArchitecture",
+                    JS_NewString(s.context, kBrowserArchitecture));
+  JS_SetPropertyStr(s.context, global, "__webcliBitness", JS_NewString(s.context, kBrowserBitness));
+  JS_SetPropertyStr(s.context, global, "__webcliSecureContext",
+                    JS_NewBool(s.context, s.secure_context));
 #if defined(_WIN32)
   constexpr const char* platform = "Win32";
 #elif defined(__APPLE__)
@@ -222,6 +235,9 @@ JsRuntime::JsRuntime(lxb_html_document_t* document, Page& page, StorageStore& st
         "WebCLI Web API initialization failed: " +
             (s.errors && !s.errors->empty() ? s.errors->back() : std::string("unknown error")));
   trace.mark("bootstrap");
+  if (frame && JS_SetPropertyStr(s.context, global, "name",
+      JS_NewString(s.context, frame->name.c_str())) < 0)
+    throw std::bad_alloc();
   s.frame_message_delivery = JS_GetPropertyStr(s.context, global, "__webcliDeliverFrameMessage");
   parse_live_document(*this, s, page, html);
   s.frame_tree->scan(s);
@@ -359,6 +375,12 @@ bool JsRuntime::network_pending() const {
          impl_->state.modules->has_pending_sources() ||
          (impl_->state.frame_id == 0 && impl_->state.frame_tree->pending());
 }
+bool JsRuntime::ready_work_pending() const {
+  impl_->state.require_owner();
+  const auto& state = impl_->state;
+  return state.scheduler.has_ready() || JS_IsJobPending(state.runtime) ||
+         (state.frame_id == 0 && state.frame_tree->ready_work_pending());
+}
 std::pair<bool, std::string> JsRuntime::select_value(lxb_dom_node_t* node) {
   impl_->state.require_owner();
   return selected_control_value(impl_->state, node);
@@ -438,6 +460,12 @@ void JsRuntime::sync(Page& page) {
   JS_FreeValue(s.context, global);
   if (page.url != "about:blank" && page.url != "about:srcdoc") s.base_url = page.url;
   page.referrer_policy = s.referrer_policy;
+  page.diagnostic_trace.assign(s.diagnostic_trace.begin(), s.diagnostic_trace.end());
+  page.diagnostic_dropped = s.diagnostic_dropped;
+  page.pending_requests = s.network.fetches.size();
+  page.pending_timers = s.timers.size();
+  page.pending_modules = s.pending_modules.size();
+  page.pending_microtasks = JS_IsJobPending(s.runtime);
 }
 std::string JsRuntime::document_base_url() const {
   impl_->state.require_owner();

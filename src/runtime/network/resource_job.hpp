@@ -14,6 +14,7 @@ namespace webcli {
 struct FetchJob {
   std::unique_ptr<DocumentLifecycle::LoadBlocker> load_blocker;
   std::string script_url;
+  std::string diagnostic_request;
   int id = 0;
   std::optional<HttpRequest> queued_request;
   bool script = false;

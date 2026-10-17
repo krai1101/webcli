@@ -37,6 +37,9 @@ JSValue js_worker_access(JSContext* context, JSValueConst, int argc, JSValueCons
       if (!url) return JS_ThrowDOMException(context, "SyntaxError", "invalid worker import URL");
       HttpRequest request;
       request.url = *url;
+      request.metadata_mode = "no-cors";
+      request.metadata_origin = channel.origin;
+      request.destination = "script";
       request.owner_cancelled = channel.stopped;
       // Classic worker imports use no-CORS script loading; credentials remain
       // restricted to the worker's inherited origin, including after redirects.

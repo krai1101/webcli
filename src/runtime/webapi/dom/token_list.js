@@ -1,15 +1,16 @@
 // DOMTokenList is live, ordered, deduplicated, and stable for an element.
 const __tokenListNodes = new WeakMap(),
-  __classLists = new WeakMap();
+  __attributeLists = new WeakMap();
 
 function __tokenNode(list) {
   const node = __tokenListNodes.get(list);
   if (!node) throw new TypeError('Illegal invocation');
-  return node;
+  return node.node;
 }
+function __tokenAttribute(list) { return __tokenListNodes.get(list).attribute; }
 
 function __tokenItems(list) {
-  return [...new Set((__tokenNode(list).getAttribute('class') || '').split(/[\t\n\f\r ]+/).filter(
+  return [...new Set((__tokenNode(list).getAttribute(__tokenAttribute(list)) || '').split(/[\t\n\f\r ]+/).filter(
     Boolean))];
 }
 
@@ -28,10 +29,10 @@ class DOMTokenList {
     return __tokenItems(this).length;
   }
   get value() {
-    return __tokenNode(this).getAttribute('class') || '';
+    return __tokenNode(this).getAttribute(__tokenAttribute(this)) || '';
   }
   set value(value) {
-    __tokenNode(this).setAttribute('class', String(value));
+    __tokenNode(this).setAttribute(__tokenAttribute(this), String(value));
   }
   item(index) {
     if (!arguments.length) throw new TypeError('Index required');
@@ -78,7 +79,10 @@ class DOMTokenList {
     this.value = items.join(' ');
     return true;
   }
-  supports() {
+  supports(token) {
+    __tokenNode(this);
+    if (__tokenAttribute(this) === 'sandbox')
+      return ['allow-scripts', 'allow-same-origin', 'allow-forms'].includes(String(token).toLowerCase());
     throw new TypeError('classList has no supported-token vocabulary');
   }
   forEach(callback, thisArg) {
@@ -107,8 +111,10 @@ class DOMTokenList {
 }
 globalThis.DOMTokenList = DOMTokenList;
 
-function __classList(node) {
-  if (!__classLists.has(node)) {
+function __attributeTokenList(node, attribute) {
+  if (!__attributeLists.has(node)) __attributeLists.set(node, new Map());
+  const lists = __attributeLists.get(node);
+  if (!lists.has(attribute)) {
     const target = Object.create(DOMTokenList.prototype);
     const indexed = key => typeof key === 'string' && /^(0|[1-9]\d*)$/.test(key) && Number(key) <
       0xffffffff;
@@ -150,9 +156,11 @@ function __classList(node) {
         return Reflect.getOwnPropertyDescriptor(target, key);
       }
     });
-    __tokenListNodes.set(target, node);
-    __tokenListNodes.set(list, node);
-    __classLists.set(node, list);
+    const backing = {node, attribute};
+    __tokenListNodes.set(target, backing);
+    __tokenListNodes.set(list, backing);
+    lists.set(attribute, list);
   }
-  return __classLists.get(node);
+  return lists.get(attribute);
 }
+function __classList(node) { return __attributeTokenList(node, 'class'); }

@@ -130,6 +130,7 @@ std::optional<HttpRequest> cors_preflight(const HttpRequest& request, const std:
   }
   if (simple_method(method) && unsafe.empty()) return std::nullopt;
   HttpRequest result = request;
+  result.destination = "empty";
   result.url = target;
   result.method = "OPTIONS";
   result.body.clear();

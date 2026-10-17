@@ -1,5 +1,5 @@
 // Nonvisual intersections follow DOM connectivity and CSS visibility. There is
-// no viewport clipping or scrolling geometry; target rectangles remain zero.
+// no viewport clipping or scrolling geometry; rectangles are nonvisual estimates.
 (() => {
   const observers = new Set(), states = new WeakMap(), entries = new WeakMap();
   const entryToken = {}, schedule = setTimeout, cancel = clearTimeout;

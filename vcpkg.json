@@ -1,6 +1,6 @@
 {
   "name": "webcli",
-  "version-string": "0.1.1",
+  "version-string": "0.1.2",
   "builtin-baseline": "3aea538b2bb21a586502c67b00eb474fdd2e3098",
   "dependencies": [
     {

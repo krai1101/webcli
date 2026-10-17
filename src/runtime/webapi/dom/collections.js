@@ -230,7 +230,9 @@ Document.prototype.createEvent = function(type) {
   const name = String(type).toLowerCase();
   if (['event', 'events', 'htmlevents', 'svgevents'].includes(name)) return new Event('');
   if (name === 'customevent') return new CustomEvent('', {detail: null});
-  throw new DOMException('Unsupported legacy event interface', 'NotSupportedError');
+  if (name === 'mouseevent' || name === 'mouseevents') return new MouseEvent('');
+  if (name === 'uievent' || name === 'uievents') return new UIEvent('');
+  throw new DOMException('Unsupported legacy event interface: ' + type, 'NotSupportedError');
 };
 for (const name of ['Node', 'Element', 'Document', 'DocumentFragment', 'Text',
     'Comment', 'CharacterData', 'ShadowRoot', 'HTMLIFrameElement']) {

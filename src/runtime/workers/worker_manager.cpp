@@ -44,6 +44,7 @@ int WorkerManager::create(const std::string& url, bool module, const std::string
   channel->url = url;
   channel->base = url;
   channel->origin = owner_.security_origin;
+  channel->secure_context = owner_.secure_context;
   channel->module = module;
   channel->name = name;
   channel->referrer_policy = owner_.referrer_policy;

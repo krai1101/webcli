@@ -20,6 +20,10 @@ inline constexpr long kScriptRequestTimeoutMs = kHttpRequestTimeoutMs;
 inline constexpr long kScriptLoadTimeoutMs = 60000;
 // Allows document/CSS acquisition and cleanup around the script load deadline.
 inline constexpr long kBrowserCommandTimeoutMs = 150000;
+// Navigation waits for the load lifecycle, matching agent-browser's default.
+inline constexpr long kNavigationLoadTimeoutMs = 25000;
+// Lightpanda and agent-browser use a 500 ms network-idle window.
+inline constexpr long kNetworkIdleWindowMs = 500;
 inline constexpr std::size_t kMaxScriptErrors = 30;
 
 // Framework commit traversal still overflows at 2 MiB with the correct DOM

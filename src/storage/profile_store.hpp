@@ -14,6 +14,7 @@ struct OriginStorage {
 std::filesystem::path profile_directory();
 std::filesystem::path diagnostic_directory();
 void append_script_error_log(const Page&, std::size_t first = 0);
+void append_runtime_trace_log(const Page&);
 class StorageStore {
  public:
   explicit StorageStore(std::shared_ptr<OriginStorage> local = std::make_shared<OriginStorage>())

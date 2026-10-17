@@ -12,6 +12,8 @@ namespace webcli {
 struct HttpRequest {
   std::string url, method = "GET", body, allowed_origin;
   std::string fetch_origin, fetch_mode;
+  // Metadata does not change CORS filtering or credential permissions.
+  std::string metadata_origin, metadata_mode, destination = "empty";
   bool fetch_credentials = false;
   std::string cookie_origin;  // Empty means the caller permits cookies on every origin.
   std::string referrer_source, referrer_policy;

@@ -57,6 +57,7 @@ lxb_dom_node_t* adopt_native_tree(ScriptContext& state, lxb_dom_node_t* node,
   // IDs. Native allocation accounting remains conservative until arena teardown.
   auto selections = remap_links(state.dom.selected_options, copies);
   auto textareas = remap_keys(state.dom.textarea_values, copies);
+  auto dialogs = remap_keys(state.dom.modal_dialogs, copies);
   auto roots = remap_links(state.dom.shadow_roots, copies);
   auto hosts = remap_links(state.dom.shadow_hosts, copies);
   auto popovers = remap_set(state.dom.open_popovers, copies);
@@ -64,11 +65,13 @@ lxb_dom_node_t* adopt_native_tree(ScriptContext& state, lxb_dom_node_t* node,
   auto inline_styles = remap_keys(state.css.inline_stylesheets, copies);
   auto adopted_styles = remap_keys(state.css.adopted_stylesheets, copies);
   auto disabled_styles = remap_set(state.css.disabled_stylesheets, copies);
+  reset_parser_form_owners(state, node);
   lxb_dom_node_remove(node);
   state.dom.node_ids.swap(node_ids);
   state.dom.nodes.swap(nodes);
   state.dom.selected_options.swap(selections);
   state.dom.textarea_values.swap(textareas);
+  state.dom.modal_dialogs.swap(dialogs);
   state.dom.shadow_roots.swap(roots);
   state.dom.shadow_hosts.swap(hosts);
   state.dom.open_popovers.swap(popovers);
@@ -98,6 +101,7 @@ JSValue js_dom_adopt(JSContext* context, JSValueConst, int argc, JSValueConst* a
       return JS_ThrowDOMException(context, "NotSupportedError", "%s", error.what());
     throw;
   }
+  reset_parser_form_owners(state, adopted);
   lxb_dom_node_remove(adopted);
   return JS_DupValue(context, argv[1]);
 }

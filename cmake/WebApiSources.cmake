@@ -3,6 +3,7 @@ set(WEBCLI_WEB_API_SOURCES
   src/runtime/webapi/platform/bootstrap.js
   src/runtime/webapi/events/events.js
   src/runtime/webapi/events/mouse_event.js
+  src/runtime/webapi/events/focus_event.js
   src/runtime/webapi/dom/mutation_observer.js
   src/runtime/webapi/dom/node.js
   src/runtime/webapi/dom/attribute.js
@@ -13,6 +14,7 @@ set(WEBCLI_WEB_API_SOURCES
   src/runtime/webapi/dom/resource_properties.js
   src/runtime/webapi/forms/controls.js
   src/runtime/webapi/events/activation.js
+  src/runtime/webapi/events/modal_interaction.js
   src/runtime/webapi/dom/interfaces.js
   src/runtime/webapi/dom/character_data.js
   src/runtime/webapi/dom/range/boundaries.js
@@ -21,6 +23,7 @@ set(WEBCLI_WEB_API_SOURCES
   src/runtime/webapi/dom/token_list.js
   src/runtime/webapi/css/inline_style.js
   src/runtime/webapi/dom/document.js
+  src/runtime/webapi/events/focus.js
   src/runtime/webapi/encoding/text_encoder.js
   src/runtime/webapi/encoding/text_decoder.js
   src/runtime/webapi/url/search_params.js
@@ -37,11 +40,17 @@ set(WEBCLI_WEB_API_SOURCES
   src/runtime/webapi/events/abort.js
   src/runtime/webapi/streams/core.js
   src/runtime/webapi/streams/readable.js
+  src/runtime/webapi/streams/writable.js
+  src/runtime/webapi/streams/transform.js
+  src/runtime/webapi/streams/pipe.js
   src/runtime/webapi/network/body.js
   src/runtime/webapi/files/blob.js
+  src/runtime/webapi/files/file_list.js
   src/runtime/webapi/forms/form_data.js
   src/runtime/webapi/forms/form_data_parser.js
+  src/runtime/webapi/wasm/webassembly.js
   src/runtime/webapi/network/fetch.js
+  src/runtime/webapi/network/data_url.js
   src/runtime/webapi/network/beacon.js
   src/runtime/webapi/network/xhr.js
   src/runtime/webapi/platform/intl.js
@@ -53,6 +62,7 @@ set(WEBCLI_WEB_API_SOURCES
   src/runtime/webapi/crypto/core.js
   src/runtime/webapi/navigation/history_clone.js
   src/runtime/webapi/events/window_message.js
+  src/runtime/webapi/events/message_channel.js
   src/runtime/webapi/events/broadcast_channel.js
   src/runtime/webapi/navigation/history_value.js
   src/runtime/webapi/storage/idb/core.js
@@ -69,6 +79,7 @@ set(WEBCLI_WEB_API_SOURCES
   src/runtime/webapi/timing/performance_observer.js
   src/runtime/webapi/dom/namespaces.js
   src/runtime/webapi/dom/document_traversal.js
+  src/runtime/webapi/dom/dialog.js
   src/runtime/webapi/css/computed_style.js
   src/runtime/webapi/dom/custom_elements.js
   src/runtime/webapi/dom/canvas.js
@@ -77,6 +88,7 @@ set(WEBCLI_WEB_API_SOURCES
   src/runtime/webapi/dom/editable.js
   src/runtime/webapi/frames/frames.js
   src/runtime/webapi/dom/geometry.js
+  src/runtime/webapi/dom/hit_testing.js
   src/runtime/webapi/events/window_scroll.js
   src/runtime/webapi/forms/labels.js
   src/runtime/webapi/navigation/anchor.js
@@ -84,6 +96,8 @@ set(WEBCLI_WEB_API_SOURCES
   src/runtime/webapi/dom/popovers.js
   src/runtime/webapi/css/media_queries.js
   src/runtime/webapi/forms/form_controls.js
+  src/runtime/webapi/forms/validity.js
+  src/runtime/webapi/forms/text_selection.js
   src/runtime/webapi/dom/html_parser.js
   src/runtime/webapi/dom/xml_serializer.js
   src/runtime/webapi/dom/document_implementation.js
@@ -107,10 +121,15 @@ set(WEBCLI_WORKER_API_SOURCES
   src/runtime/webapi/events/abort.js
   src/runtime/webapi/streams/core.js
   src/runtime/webapi/streams/readable.js
+  src/runtime/webapi/streams/writable.js
+  src/runtime/webapi/streams/transform.js
+  src/runtime/webapi/streams/pipe.js
   src/runtime/webapi/network/body.js
   src/runtime/webapi/files/blob.js
+  src/runtime/webapi/files/file_list.js
   src/runtime/webapi/forms/form_data.js
   src/runtime/webapi/forms/form_data_parser.js
+  src/runtime/webapi/wasm/webassembly.js
   src/runtime/webapi/network/fetch.js
   src/runtime/webapi/network/xhr.js
   src/runtime/webapi/platform/intl.js
@@ -121,7 +140,9 @@ set(WEBCLI_WORKER_API_SOURCES
   src/runtime/webapi/crypto/core.js
   src/runtime/webapi/navigation/history_clone.js
   src/runtime/webapi/events/window_message.js
+  src/runtime/webapi/events/message_channel.js
   src/runtime/webapi/events/broadcast_channel.js
   src/runtime/webapi/navigation/history_value.js
   src/runtime/webapi/workers/global_scope.js
+  src/runtime/webapi/network/data_url.js
 )

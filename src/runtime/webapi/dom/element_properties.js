@@ -1,4 +1,6 @@
 __installDomMembers(class {
+  get inert() { return this.hasAttribute('inert'); }
+  set inert(value) { this.toggleAttribute('inert', !!value); }
   get id() {
     return this.getAttribute('id') || '';
   }

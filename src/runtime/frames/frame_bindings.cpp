@@ -5,6 +5,7 @@
 #include "runtime/engine/js_handles.hpp"
 #include "runtime/engine/script_context.hpp"
 #include "runtime/frames/frame_tree.hpp"
+#include "runtime/messaging/message_ports.hpp"
 
 namespace webcli {
 namespace {
@@ -52,6 +53,17 @@ JSValue js_frame_access(JSContext* context, JSValueConst, int argc, JSValueConst
   if (!tree || !argc) return JS_NULL;
   const auto operation = js_string(context, argv[0]);
   if (operation == "self") return JS_NewInt32(context, caller.frame_id);
+  if (operation == "open") {
+    if (argc < 4) return JS_ThrowTypeError(context, "popup URL and name required");
+    const auto raw = js_string(context, argv[1]);
+    const auto resolved = raw.empty() || raw == "about:blank"
+                              ? std::optional<std::string>(raw)
+                              : resolve_web_url(caller.base_url, raw);
+    if (!resolved) return JS_ThrowDOMException(context, "SyntaxError", "invalid popup URL");
+    return JS_NewInt32(context, tree->open_popup(caller, *resolved, js_string(context, argv[2]),
+                                                 JS_ToBool(context, argv[3]) > 0,
+                                                 argc > 4 && JS_ToBool(context, argv[4]) > 0));
+  }
   if (operation == "element-id") {
     auto* node = argc > 1 ? dom_node_arg(context, argv[1]) : nullptr;
     return JS_NewInt32(context, tree->ensure(caller, node));
@@ -60,9 +72,22 @@ JSValue js_frame_access(JSContext* context, JSValueConst, int argc, JSValueConst
   if (argc > 1 && JS_ToInt32(context, &id, argv[1]) < 0) return JS_EXCEPTION;
   auto* target = tree->state(id);
   if (operation == "closed") return JS_NewBool(context, !target);
+  if (operation == "popup-window") {
+    auto* owner = tree->state(0);
+    if (!owner || !accessible(caller, *owner)) owner = &caller;
+    const JsValueOwner global(owner->context, JS_GetGlobalObject(owner->context));
+    const JsValueOwner proxy(owner->context, JS_GetPropertyStr(owner->context, global.get(), "__webcliWindowProxy"));
+    JSValue argument = JS_NewInt32(owner->context, id);
+    return result_in(context, owner->context, JS_Call(owner->context, proxy.get(), JS_UNDEFINED, 1, &argument));
+  }
+  if (operation == "close") {
+    tree->close_popup(id);
+    return JS_UNDEFINED;
+  }
   if (!target) return JS_NULL;
   if (operation == "parent") return JS_NewInt32(context, tree->parent(id));
-  if (operation == "top") return JS_NewInt32(context, 0);
+  if (operation == "top") return JS_NewInt32(context, tree->top(id));
+  if (operation == "opener") return JS_NewInt32(context, tree->opener(id));
   if (operation == "length") {
     tree->scan(*target);
     return JS_NewInt32(context, tree->count(id));
@@ -105,22 +130,59 @@ JSValue js_frame_access(JSContext* context, JSValueConst, int argc, JSValueConst
       return JS_ThrowDOMException(context, "DataCloneError", "message cannot be cloned");
     }
     auto data = std::make_shared<JsValueOwner>(target->context, cloned);
+    std::vector<int> transfer;
+    if (argc > 4) {
+      const JsValueOwner length(context, JS_GetPropertyStr(context, argv[4], "length"));
+      uint32_t count;
+      if (JS_ToUint32(context, &count, length.get()) < 0) return JS_EXCEPTION;
+      for (uint32_t index = 0; index < count; ++index) {
+        const JsValueOwner item(context, JS_GetPropertyUint32(context, argv[4], index));
+        int32_t port;
+        if (JS_ToInt32(context, &port, item.get()) < 0) return JS_EXCEPTION;
+        transfer.push_back(port);
+      }
+    }
+    auto adopted = std::make_shared<std::vector<int>>();
+    if (!transfer.empty()) {
+      if (!caller.ports)
+        return JS_ThrowDOMException(context, "DataCloneError", "invalid transferred port");
+      if (!target->ports) target->ports = std::make_shared<MessagePorts>(*target);
+    }
     const auto origin = caller.opaque_origin ? "null" : caller.security_origin;
     const int source = caller.frame_id;
-    target->scheduler.schedule(
-        TaskScheduler::Source::Resource, {}, [tree, id, source, origin, required, data, target] {
+    const auto task = target->scheduler.schedule(
+        TaskScheduler::Source::Resource, {},
+        [tree, id, source, origin, required, data, target, adopted] {
           // A queued message must not enter a replacement document or a removed frame.
           if (tree->state(id) != target || !target->active ||
-              (required != "*" && (target->opaque_origin || target->security_origin != required)))
+              (required != "*" && (target->opaque_origin || target->security_origin != required))) {
+            if (target->ports)
+              for (int port : *adopted) target->ports->close(port);
             return;
+          }
+          const JsValueOwner ports(target->context, JS_NewArray(target->context));
+          for (uint32_t index = 0; index < adopted->size(); ++index)
+            JS_SetPropertyUint32(target->context, ports.get(), index,
+                                 JS_NewInt32(target->context, (*adopted)[index]));
           JSValue args[] = {data->get(), JS_NewString(target->context, origin.c_str()),
-                            JS_NewInt32(target->context, source)};
+                            JS_NewInt32(target->context, source), ports.get()};
           auto result =
-              JS_Call(target->context, target->frame_message_delivery, JS_UNDEFINED, 3, args);
+              JS_Call(target->context, target->frame_message_delivery, JS_UNDEFINED, 4, args);
           JS_FreeValue(target->context, args[1]);
           if (JS_IsException(result)) record_async_js_error(target, target->context);
           JS_FreeValue(target->context, result);
         });
+    // A failed queue allocation or invalid transfer must leave sender ports
+    // intact. The task cannot execute until this synchronous binding returns.
+    try {
+      if (!transfer.empty()) *adopted = caller.ports->transfer_to(*target->ports, transfer);
+    } catch (const CliError& error) {
+      target->scheduler.cancel(task);
+      return JS_ThrowDOMException(context, "DataCloneError", "%s", error.what());
+    } catch (...) {
+      target->scheduler.cancel(task);
+      throw;
+    }
     return JS_UNDEFINED;
   }
   if (!accessible(caller, *target))

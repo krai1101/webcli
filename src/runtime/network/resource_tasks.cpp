@@ -5,6 +5,7 @@
 #include "network/resource_service.hpp"
 #include "runtime/dom/dom_bindings.hpp"
 #include "runtime/dom/dom_helpers.hpp"
+#include "runtime/engine/diagnostics.hpp"
 #include "runtime/engine/js_handles.hpp"
 #include "runtime/engine/script_context.hpp"
 #include "runtime/network/referrer_policy.hpp"
@@ -47,6 +48,8 @@ void start_queued_http(ScriptContext& state) {
     auto request = std::move(*job->queued_request);
     request.deadline_start = std::chrono::steady_clock::now();
     const bool script = job->script;
+    trace_runtime(state, "network",
+                  "start #" + std::to_string(job->id) + " " + job->diagnostic_request);
     try {
       job->future = resource_service().submit(
           [request = std::move(request), script] { return load_resource(request, script); });
@@ -65,6 +68,9 @@ JSValue enqueue_http(ScriptContext& state, HttpRequest request, bool script, boo
     return JS_ThrowInternalError(state.context, "page exceeded 256 queued resource requests");
   auto job = std::make_unique<FetchJob>();
   job->id = state.network.next_http_id++;
+  job->diagnostic_request = request.method + " " + diagnostic_url(request.url);
+  trace_runtime(state, "network",
+                "queued #" + std::to_string(job->id) + " " + job->diagnostic_request);
   JSValue callbacks[2];
   JsValueOwner promise(state.context, JS_NewPromiseCapability(state.context, callbacks));
   if (JS_IsException(promise.get())) return promise.release();
@@ -95,6 +101,9 @@ JSValue js_native_image_load(JSContext* context, JSValueConst, int argc, JSValue
   HttpRequest request;
   request.owner_cancelled = state.cancelled;
   request.url = *url;
+  request.metadata_mode = "no-cors";
+  request.metadata_origin = state.opaque_origin ? "null" : state.security_origin;
+  request.destination = "image";
   request.cookie_origin = state.base_url;
   request.referrer_source = state.base_url;
   request.referrer_policy = element_referrer_policy(
@@ -113,6 +122,9 @@ JSValue js_native_script_load(JSContext* context, JSValueConst, int argc, JSValu
   HttpRequest request;
   request.owner_cancelled = state.cancelled;
   request.url = *url;
+  request.metadata_mode = "no-cors";
+  request.metadata_origin = state.opaque_origin ? "null" : state.security_origin;
+  request.destination = "script";
   request.cookie_origin = state.base_url;
   request.referrer_source = state.base_url;
   request.referrer_policy = element_referrer_policy(

@@ -185,6 +185,22 @@ for (const [name, tag] of [['HTMLAudioElement', 'AUDIO'], ['HTMLVideoElement', '
 }
 
 // Expose native accessor descriptors where controlled input frameworks expect them.
+const __inputFileLists = new WeakMap();
+Object.defineProperty(HTMLInputElement.prototype, 'files', {
+  configurable: true,
+  enumerable: true,
+  get() {
+    if (!(this instanceof HTMLInputElement)) throw new TypeError('Input element required');
+    if (this.type !== 'file') return null;
+    if (!__inputFileLists.has(this)) __inputFileLists.set(this, __fileListEngine.create());
+    return __inputFileLists.get(this);
+  },
+  set(value) {
+    if (!(this instanceof HTMLInputElement)) throw new TypeError('Input element required');
+    if (value !== null && !__fileListEngine.has(value)) throw new TypeError('FileList required');
+    if (this.type === 'file' && value !== null) __inputFileLists.set(this, value);
+  }
+});
 for (const name of ['HTMLInputElement', 'HTMLTextAreaElement', 'HTMLSelectElement']) {
   for (const property of ['value', 'checked', 'selectedIndex']) {
     const descriptor = Object.getOwnPropertyDescriptor(DomNode.prototype, property);

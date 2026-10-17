@@ -2,6 +2,7 @@
 #include <lexbor/html/html.h>
 
 #include <memory>
+#include <cstdint>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -22,7 +23,12 @@ struct DomState {
   std::unordered_map<lxb_dom_node_t*, lxb_dom_node_t*> selected_options;
   // An absent entry means the textarea still follows its default child text.
   std::unordered_map<lxb_dom_node_t*, std::string> textarea_values;
+  // HTML parser association survives table foster parenting until a DOM move.
+  std::unordered_map<lxb_dom_node_t*, lxb_dom_node_t*> parser_form_owners;
   std::unordered_set<lxb_dom_node_t*> open_popovers;
+  // Opening order, rather than document order, determines the active dialog.
+  std::unordered_map<lxb_dom_node_t*, std::uint64_t> modal_dialogs;
+  std::uint64_t modal_sequence = 0;
   std::unordered_map<lxb_dom_node_t*, lxb_dom_node_t*> shadow_roots;
   std::unordered_map<lxb_dom_node_t*, lxb_dom_node_t*> shadow_hosts;
   std::unordered_map<lxb_dom_node_t*, lxb_dom_node_t*> assigned_slots;

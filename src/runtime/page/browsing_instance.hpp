@@ -1,6 +1,8 @@
 #pragma once
 #include <cstdint>
+#include <chrono>
 #include <memory>
+#include <map>
 #include <vector>
 
 #include "core/page.hpp"
@@ -22,6 +24,11 @@ class BrowsingInstance {
   void tick();
   void tick_background();
   void mark_diagnostics_reported();
+#ifdef WEBCLI_UPSTREAM_TEST_DRIVER
+  // Test-only DOM access; absent from the product executable and CLI protocol.
+  std::string test_evaluate(const std::string& expression);
+  void test_action(EngineRequest request);
+#endif
 
  private:
   struct Document;
@@ -36,6 +43,7 @@ class BrowsingInstance {
   std::shared_ptr<std::atomic<bool>> cancelled_;
   std::shared_ptr<HistoryArchive> history_archive_ = std::make_shared<HistoryArchive>();
   std::uint64_t next_history_group_ = 0;
+  std::map<char, std::size_t> reference_counts_;
   std::shared_ptr<Document> current_;
   std::vector<Entry> history_;
   std::size_t position_ = 0;
@@ -46,6 +54,10 @@ class BrowsingInstance {
   void trim_history();
   void transitions(unsigned depth = 0);
   void snapshot();
+  const Page& publish();
+  std::string resolve_reference(const std::string&) const;
+  void wait_for_load(std::chrono::steady_clock::time_point deadline);
+  void wait_after_click(std::chrono::steady_clock::time_point deadline);
   int find_node(const std::string&) const;
   int find_frame(const std::string&) const;
   void submit_form(int form, int button);

@@ -98,8 +98,9 @@ void rotate(const std::filesystem::path& path) {
 }
 }  // namespace
 
-void append_script_error_log(const Page& page, std::size_t first) {
-  if (first >= page.script_errors.size()) return;
+static void append_log_entries(const Page& page, std::size_t first, bool trace) {
+  const auto count = trace ? page.diagnostic_trace.size() : page.script_errors.size();
+  if (first >= count) return;
   std::lock_guard<std::mutex> guard(log_mutex);
   const auto dir = diagnostic_directory();
   std::filesystem::create_directories(dir);
@@ -120,13 +121,21 @@ void append_script_error_log(const Page& page, std::size_t first) {
     rotate(path);
     bytes = 0;
   }
-  for (std::size_t i = first; i < page.script_errors.size(); ++i) {
+  for (std::size_t i = first; i < count; ++i) {
     std::ostringstream record;
     record << "{\"timestamp_unix_ms\":" << now
-           << ",\"documentId\":" << json_escape(page.document_id)
-           << ",\"url\":" << json_escape(truncate(page.url, 8192))
-           << ",\"category\":\"javascript\",\"message\":"
-           << json_escape(truncate(page.script_errors[i], 1200)) << "}\n";
+           << ",\"documentId\":" << json_escape(page.document_id);
+    if (trace) {
+      const auto& entry = page.diagnostic_trace[i];
+      record << ",\"elapsedMs\":" << entry.elapsed_ms
+             << ",\"category\":" << json_escape(entry.category)
+             << ",\"message\":" << json_escape(entry.message);
+    } else {
+      record << ",\"url\":" << json_escape(truncate(page.url, 8192))
+             << ",\"category\":\"javascript\",\"message\":"
+             << json_escape(truncate(page.script_errors[i], 1200));
+    }
+    record << "}\n";
     const auto text = record.str();
     if (bytes && text.size() > kLogBytes - bytes) {
       rotate(path);
@@ -138,5 +147,17 @@ void append_script_error_log(const Page& page, std::size_t first) {
     if (!log) throw CliError("LOG_WRITE_FAILED", "could not write diagnostic log");
     bytes += text.size();
   }
+}
+void append_script_error_log(const Page& page, std::size_t first) {
+  append_log_entries(page, first, false);
+}
+void append_runtime_trace_log(const Page& page) {
+  const auto total = page.diagnostic_dropped + page.diagnostic_trace.size();
+  if (total <= page.diagnostic_logged) return;
+  const auto first = page.diagnostic_logged > page.diagnostic_dropped
+                         ? page.diagnostic_logged - page.diagnostic_dropped
+                         : 0;
+  append_log_entries(page, first, true);
+  page.diagnostic_logged = total;
 }
 }  // namespace webcli

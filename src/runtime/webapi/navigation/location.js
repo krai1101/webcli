@@ -7,7 +7,10 @@ const __locationEngine = (() => {
       if (target === oldURL) return;
       __historyEngine.commit(null, target, replace);
       const event = new HashChangeEvent('hashchange', {oldURL, newURL: target});
-      schedule(() => window.dispatchEvent(event), 0);
+      schedule(() => {
+        window.dispatchEvent(new PopStateEvent('popstate', {state: history.state}));
+        window.dispatchEvent(event);
+      }, 0);
     } else {
       __webcliQueueNavigation(target, replace, reload, anchor?.__id ?? -1);
     }

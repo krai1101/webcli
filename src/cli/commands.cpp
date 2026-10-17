@@ -10,11 +10,13 @@ namespace webcli {
 const std::vector<CommandSpec>& command_specs() {
   static const std::vector<CommandSpec> specs{
       {"open", "open <url>", "Navigate to a URL", 1, 1},
+      {"back", "back", "Go to the previous history entry and show the page", 0, 0},
+      {"forward", "forward", "Go to the next history entry and show the page", 0, 0},
       {"observe", "observe", "Current page text and actionable refs; no reload", 0, 0},
-      {"click", "click <ref>", "Activate a link/button or toggle a control", 1, 1},
+      {"click", "click <ref>", "Click, wait for load/network idle, then show the page", 1, 1},
       {"fill", "fill <I-ref> <value>", "Fill a field; true/false for checkbox/radio", 2, 2},
       {"select", "select <S-ref> <value>", "Select an option by its value", 2, 2},
-      {"keyboard", "keyboard <ref> <key>", "Focus a ref and send Enter or Escape", 2, 2},
+      {"keyboard", "keyboard <ref> <key>", "Send Enter, Escape, Tab or Shift+Tab to a ref", 2, 2},
       {"wait", "wait [idle|text|gone|ref|selector] [value]",
        "Wait for a condition; bounded by --timeout", 0, 2},
       {"close", "close", "Close this browsing instance; keep cookies/localStorage", 0, 0},
@@ -94,6 +96,10 @@ EngineRequest engine_request(const Request& request) {
   result.timeout_ms = request.timeout_ms;
   if (request.command == "open")
     result.action = BrowserAction::Open;
+  else if (request.command == "back")
+    result.action = BrowserAction::Back;
+  else if (request.command == "forward")
+    result.action = BrowserAction::Forward;
   else if (request.command == "observe")
     result.action = BrowserAction::Observe;
   else if (request.command == "click")
@@ -178,7 +184,7 @@ void show_help(std::ostream& out) {
   }
   out << "\nOptions (terminal and prompt):\n"
          "  --json             Machine-readable observation or error\n"
-         "  --debug            All retained JavaScript warnings and stacks; page diagnostics\n"
+         "  --debug            Runtime activity, pending work, HTTP results and JavaScript errors\n"
          "  --offset N         Content block offset (default: linked section or main content)\n"
          "  --limit N          Content blocks to return (1..200, default: 80)\n"
          "  --timeout MS       Wait timeout (1..30000, default: 5000)\n"
@@ -186,7 +192,7 @@ void show_help(std::ostream& out) {
          "Refs: [L1] link, [B1] button, [I1] input, [S1] select. Use refs from current output.\n"
          "Examples: open example.com | click B1 | fill I1 \"Ada Lovelace\" | select S1 manager\n"
          "          keyboard I1 Enter | wait text \"Ready\" --timeout 10000 | observe --offset 80\n"
-         "Keyboard keys: Enter, Escape (case-sensitive).\n"
+         "Keyboard keys: Enter, Escape, Tab, Shift+Tab (case-sensitive).\n"
          "Run webcli without a command for the prompt. Type quit/exit to leave it.\n"
          "Default prompts have independent pages and share saved default cookies/storage.\n"
          "Default terminal commands reuse the calling shell's page.\n"

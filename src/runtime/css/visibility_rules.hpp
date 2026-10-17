@@ -10,7 +10,7 @@ struct StyleSource {
   std::string source, media;
 };
 struct VisibilityValue {
-  std::string display, visibility;
+  std::string display, visibility, opacity;
 };
 using VisibilityValues = std::unordered_map<lxb_dom_node_t*, VisibilityValue>;
 bool visibility_media_matches(const std::string&);

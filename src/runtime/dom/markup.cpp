@@ -46,7 +46,10 @@ JSValue js_dom_html(JSContext* context, JSValueConst, int argc, JSValueConst* ar
       imported.push_back(copy);
     }
     // Detached old children stay document-owned so existing JS wrappers remain valid.
-    while (auto* child = node->first_child) lxb_dom_node_remove(child);
+    while (auto* child = node->first_child) {
+      reset_parser_form_owners(*state, child);
+      lxb_dom_node_remove(child);
+    }
     for (auto* child : imported) lxb_dom_node_insert_child(node, child);
     return JS_UNDEFINED;
   }

@@ -18,6 +18,7 @@
 #include "runtime/engine/js_handles.hpp"
 #include "runtime/engine/js_runtime.hpp"
 #include "runtime/engine/script_context.hpp"
+#include "runtime/frames/frame_tree.hpp"
 #include "runtime/network/referrer_policy.hpp"
 #include "runtime/scripts/document_executor.hpp"
 #include "runtime/scripts/document_scripts.hpp"
@@ -34,8 +35,11 @@ class ParserCoordinator {
     tokenizer_ = lxb_html_parser_tokenizer(parser);
     original_ = tokenizer_->callback_token_done;
     original_context_ = tokenizer_->callback_token_ctx;
-    tokenizer_->callback_token_done = token;
-    tokenizer_->callback_token_ctx = this;
+    auto& document = state.dom.document->dom_document;
+    original_mutation_ = document.mutation;
+    mutation_ = *document.mutation;
+    mutation_.inserted = inserted_node;
+    document_user_ = document.user;
     state_.parser_write = [this](std::string source) {
       if (source.size() > kDomFragmentBytes || source.size() > kDomAllocationBytes - written_bytes_)
         throw CliError("DOM_QUOTA", "document.write input exceeds parser allocation limits");
@@ -55,8 +59,17 @@ class ParserCoordinator {
       }
       --write_depth_;
     };
+    // Install borrowed callbacks only after potentially allocating setup.
+    // A constructor failure must not leave pointers into this object behind.
+    tokenizer_->callback_token_done = token;
+    tokenizer_->callback_token_ctx = this;
+    document.user = this;
+    document.mutation = &mutation_;
   }
   ~ParserCoordinator() {
+    auto& document = state_.dom.document->dom_document;
+    document.mutation = original_mutation_;
+    document.user = document_user_;
     state_.parser_write = {};
     tokenizer_->callback_token_done = original_;
     tokenizer_->callback_token_ctx = original_context_;
@@ -109,6 +122,7 @@ class ParserCoordinator {
       }
       if (pending_script_) {
         account_tree();
+        state_.frame_tree->scan(state_);
         auto* script = pending_script_;
         pending_script_ = nullptr;
         handle_script(script);
@@ -133,6 +147,14 @@ class ParserCoordinator {
   }
 
  private:
+  static lxb_status_t inserted_node(lxb_dom_node_t* node) {
+    auto* document = node->owner_document;
+    auto& self = *static_cast<ParserCoordinator*>(document->user);
+    if (node->local_name == self.parsing_tag_ && node->ns == LXB_NS_HTML)
+      self.created_ = node;
+    if (self.original_mutation_->inserted) return self.original_mutation_->inserted(node);
+    return LXB_STATUS_OK;
+  }
   void account_tree() {
     if (accounted_revision_ == state_.css.style_generation) return;
     const auto usage = measure_tree(lxb_dom_interface_node(&state_.dom.document->dom_document));
@@ -160,6 +182,9 @@ class ParserCoordinator {
     const bool template_end =
         value->tag_id == LXB_TAG_TEMPLATE && (value->type & LXB_HTML_TOKEN_TYPE_CLOSE);
     if (value->tag_id == LXB_TAG_LINK || value->tag_id == LXB_TAG_BASE) self.styles_dirty_ = true;
+    auto* parser_form = tokenizer->tree->form;
+    self.created_ = nullptr;
+    self.parsing_tag_ = value->tag_id;
     auto* result = self.original_(tokenizer, value, self.original_context_);
     if (script_end && !template_node) self.pending_script_ = current;
     if (template_end && template_node &&
@@ -168,6 +193,15 @@ class ParserCoordinator {
       self.pending_template_ = template_node;
     if (!(value->type & LXB_HTML_TOKEN_TYPE_CLOSE)) {
       try {
+        if (!template_node && parser_form && self.created_ &&
+            (value->tag_id == LXB_TAG_INPUT || value->tag_id == LXB_TAG_BUTTON ||
+             value->tag_id == LXB_TAG_SELECT || value->tag_id == LXB_TAG_TEXTAREA)) {
+          auto* owner = reinterpret_cast<lxb_dom_node_t*>(parser_form);
+          auto* ancestor = self.created_->parent;
+          while (ancestor && ancestor != owner) ancestor = ancestor->parent;
+          if (!ancestor && !has_attr(self.created_, "form"))
+            self.state_.dom.parser_form_owners[self.created_] = owner;
+        }
         if (value->tag_id == LXB_TAG_META && !template_node) {
           auto* parent = lxb_html_tree_current_node(tokenizer->tree);
           if (parent) process_referrer_meta(self.state_, parent->last_child);
@@ -222,6 +256,11 @@ class ParserCoordinator {
   ScriptContext& state_;
   Page& page_;
   lxb_html_tokenizer_t* tokenizer_ = nullptr;
+  const lxb_dom_document_mutation_cb_t* original_mutation_ = nullptr;
+  lxb_dom_document_mutation_cb_t mutation_{};
+  void* document_user_ = nullptr;
+  lxb_dom_node_t* created_ = nullptr;
+  lxb_tag_id_t parsing_tag_ = LXB_TAG__UNDEF;
   lxb_html_tokenizer_token_f original_ = nullptr;
   void* original_context_ = nullptr;
   lxb_dom_node_t* pending_script_ = nullptr;

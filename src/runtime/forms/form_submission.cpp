@@ -1,12 +1,12 @@
 #include "runtime/forms/form_submission.hpp"
 
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include "core/errors.hpp"
 #include "network/http_client.hpp"
 #include "runtime/dom/dom_helpers.hpp"
+#include "runtime/dom/dom_bindings.hpp"
 #include "runtime/engine/js_runtime.hpp"
 
 namespace webcli {
@@ -36,13 +36,10 @@ Form collect_submission_form(lxb_dom_node_t* form_node, JsRuntime& runtime,
   if (root->type != LXB_DOM_NODE_TYPE_DOCUMENT && !runtime.composed_parent(root))
     throw CliError("FORM_NOT_FOUND", "form is no longer attached");
   std::vector<lxb_dom_node_t*> nodes, stack{root};
-  std::unordered_map<std::string, lxb_dom_node_t*> identifiers;
   while (!stack.empty()) {
     auto* node = stack.back();
     stack.pop_back();
     nodes.push_back(node);
-    const auto id = attr(node, "id");
-    if (!id.empty()) identifiers.emplace(id, node);
     for (auto* child = node->last_child; child; child = child->prev) stack.push_back(child);
   }
   Form result;
@@ -55,17 +52,7 @@ Form collect_submission_form(lxb_dom_node_t* form_node, JsRuntime& runtime,
   for (auto* node : nodes) {
     const auto tag = tag_name(node);
     if (tag != "input" && tag != "textarea" && tag != "select" && tag != "button") continue;
-    lxb_dom_node_t* owner = nullptr;
-    if (has_attr(node, "form")) {
-      const auto found = identifiers.find(attr(node, "form"));
-      if (found != identifiers.end() && tag_name(found->second) == "form") owner = found->second;
-    } else {
-      for (auto* parent = node->parent; parent; parent = parent->parent)
-        if (tag_name(parent) == "form") {
-          owner = parent;
-          break;
-        }
-    }
+    auto* owner = form_owner(runtime.script_context(), node);
     if (owner != form_node) continue;
     Field field;
     field.node_id = runtime.node_id(node);

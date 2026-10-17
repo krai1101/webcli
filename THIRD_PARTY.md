@@ -37,8 +37,23 @@ dynamically linked and replaceable. Other bundled dependency notices are in
 
 ## Design acknowledgment
 
+### Upstream test fixtures
+
+`tests/upstream/lightpanda/` contains unmodified scripts, golden results and the
+fixture server from [Lightpanda's demo repository](https://github.com/lightpanda-io/demo),
+commit `24aaecefc5ced8896aaed9d3846e3049f96f93f8`, under Apache-2.0.
+The upstream license and copyright notices are retained in that directory.
+These are development tests, not runtime dependencies. WebCLI's test adapter
+is separate; it does not change the upstream scripts or expected results.
+
 [Andy Cufari's WebCLI](https://github.com/andycufari/webcli) informed the
 numbered text interaction design and terminal wordmark. Its MIT license and
 copyright notice are included in [licenses/andycufari-webcli-MIT.txt](licenses/andycufari-webcli-MIT.txt).
 It is a design reference, not a runtime dependency. WebCLI's native C++ engine
 is developed independently.
+
+WAMR 2.4.5 (WebAssembly interpreter) is distributed under Apache-2.0 WITH
+LLVM-exception; see [its license](licenses/wamr.txt). The build pins commit
+`25bd7eb63e828e4bd242cc9b38d260b4b31c6605` and disables the standalone
+memory-shrinking optimization in a generated loader copy to support host
+JavaScript memory growth. WASI, JIT/AOT and shared-memory threads are disabled.

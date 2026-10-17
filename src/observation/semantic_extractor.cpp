@@ -116,19 +116,75 @@ void SemanticExtractor::extract(lxb_html_document_t* document, Page& page, JsRun
     if (!scopes.count(node)) return true;
     auto found = ignored_cache.find(node);
     if (found != ignored_cache.end()) return found->second;
-    // ARIA excludes nodes from accessibility; it does not hide displayed text.
-    const auto value = ignored_subtree(node, false, false) ||
+    // Agent observations follow accessibility visibility for both text and
+    // controls. Modal backdrops can remain painted while aria-hidden excludes
+    // their entire subtree from the current interaction context.
+    const auto value = ignored_subtree(node, false, true) ||
                        stylesheet_display_none(node, visibility) ||
                        (node->type == LXB_DOM_NODE_TYPE_TEXT &&
                         stylesheet_invisible(node, visibility, composed_parent));
     ignored_cache.emplace(node, value);
     return value;
   };
+  lxb_dom_node_t* modal = nullptr;
+  bool restrict_to_modal = false;
   auto hidden = [&](lxb_dom_node_t* node) {
+    if (restrict_to_modal) {
+      bool inside = false;
+      for (auto* ancestor = node; ancestor; ancestor = runtime.composed_parent(ancestor))
+        if (ancestor == modal) { inside = true; break; }
+      if (!inside) return true;
+    }
     for (auto* parent = node; parent; parent = runtime.composed_parent(parent))
       if (ignored(parent) || ignored_subtree(parent, false, true)) return true;
     return stylesheet_invisible(node, visibility, composed_parent);
   };
+  // aria-modal identifies custom dialogs; native modal state is tracked
+  // separately because an ordinary dialog.show() does not block its page.
+  const auto concealed_background = [&](lxb_dom_node_t* dialog) {
+    // Some dialog libraries signal modality by excluding surrounding content
+    // from accessibility, rather than setting aria-modal on the dialog itself.
+    for (auto* branch = dialog; branch; branch = runtime.composed_parent(branch)) {
+      auto* parent = runtime.composed_parent(branch);
+      if (!parent) break;
+      for (auto* sibling : runtime.composed_children(parent)) {
+        const auto tag = tag_name(sibling);
+        if (sibling == branch || tag.empty() || tag == "svg" || tag == "script" || tag == "style")
+          continue;
+        if (has_attr(sibling, "inert") || attr(sibling, "aria-hidden") == "true") return true;
+      }
+    }
+    return false;
+  };
+  std::uint64_t native_order = 0;
+  for (auto* node : nodes) {
+    if (hidden(node)) continue;
+    const auto native = state.dom.modal_dialogs.find(node);
+    if (has_attr(node, "open") && native != state.dom.modal_dialogs.end()) {
+      if (native->second > native_order) {
+        native_order = native->second;
+        modal = node;
+      }
+    } else if (!native_order &&
+               (attr(node, "role") == "dialog" || attr(node, "role") == "alertdialog") &&
+               (attr(node, "aria-modal") == "true" ||
+                (attr(node, "aria-modal") != "false" && concealed_background(node)))) {
+      modal = node;
+    }
+  }
+  if (modal) {
+    restrict_to_modal = true;
+    Button outside;
+    outside.label = "Outside dialog";
+    outside.type = "button";
+    outside.node_id = runtime.node_id(modal);
+    outside.frame_id = state.frame_id;
+    outside.ref = reference(outside.node_id, 'B');
+    outside.outside_modal = true;
+    page.content.push_back({"heading", "Modal", ""});
+    page.content.push_back({"button", outside.label, outside.ref});
+    page.buttons.push_back(std::move(outside));
+  }
   std::map<lxb_dom_node_t*, std::string> visible_refs;
   std::map<lxb_dom_node_t*, std::string> visible_labels;
   std::set<lxb_dom_node_t*> suppressed_links;
@@ -136,12 +192,15 @@ void SemanticExtractor::extract(lxb_html_document_t* document, Page& page, JsRun
   for (auto* node : nodes) {
     const auto tag = tag_name(node);
     const auto role = attr(node, "role");
-    const bool menu_action = role == "menuitem" || role == "menuitemcheckbox" ||
-                             role == "menuitemradio";
-    const bool editable = node->type == LXB_DOM_NODE_TYPE_ELEMENT &&
-                          is_content_editable(node) && !is_content_editable(node->parent);
+    const bool menu_action =
+        role == "menuitem" || role == "menuitemcheckbox" || role == "menuitemradio";
+    // ARIA links can be script-driven elements without an HTML href. They
+    // still need an action ref; clicking dispatches through their own realm.
+    const bool scripted_link = role == "link" && !(tag == "a" && has_attr(node, "href"));
+    const bool editable = node->type == LXB_DOM_NODE_TYPE_ELEMENT && is_content_editable(node) &&
+                          !is_content_editable(node->parent);
     if (tag != "a" && tag != "button" && tag != "input" && tag != "select" && tag != "textarea" &&
-        role != "button" && role != "tab" && !menu_action && !editable)
+        role != "button" && role != "tab" && !menu_action && !scripted_link && !editable)
       continue;
     const auto id = runtime.node_id(node);
     if (id < 0) {
@@ -221,7 +280,7 @@ void SemanticExtractor::extract(lxb_html_document_t* document, Page& page, JsRun
     const bool button = tag == "button" ||
                         (tag == "input" && (type_attr == "submit" || type_attr == "button" ||
                                             type_attr == "reset")) ||
-                        role == "button" || role == "tab" || menu_action;
+                        role == "button" || role == "tab" || menu_action || scripted_link;
     if (!invisible &&
         ((tag == "a" && !button && has_attr(node, "href") && page.links.size() >= kMaxLinks) ||
          (button && page.buttons.size() >= kMaxButtons)))
@@ -248,6 +307,7 @@ void SemanticExtractor::extract(lxb_html_document_t* document, Page& page, JsRun
       auto r = reference(id, 'B');
       page.buttons.push_back({truncate(label, 180), type, css_path(node), r, id});
       page.buttons.back().frame_id = state.frame_id;
+      if (scripted_link) page.buttons.back().role = "link";
       visible_refs[node] = r;
       visible_labels[node] = truncate(label, 180);
       if (role == "tab") {
@@ -265,12 +325,13 @@ void SemanticExtractor::extract(lxb_html_document_t* document, Page& page, JsRun
     field.id = attr(node, "id");
     field.name = attr(node, "name");
     field.selector = css_path(node);
-    field.type = editable && tag != "input" && tag != "textarea" && tag != "select" &&
-                         tag != "button" ? "contenteditable"
-                 : tag == "select"     ? "select"
-                 : tag == "textarea" ? "textarea"
-                 : type_attr.empty() ? (tag == "button" ? "submit" : "text")
-                                     : type_attr;
+    field.type =
+        editable && tag != "input" && tag != "textarea" && tag != "select" && tag != "button"
+            ? "contenteditable"
+        : tag == "select"   ? "select"
+        : tag == "textarea" ? "textarea"
+        : type_attr.empty() ? (tag == "button" ? "submit" : "text")
+                            : type_attr;
     field.label = label;
     if (field.label.empty()) field.label = attr(node, "placeholder");
     if (field.label.empty()) field.label = field.name.empty() ? field.id : field.name;
@@ -340,47 +401,61 @@ void SemanticExtractor::extract(lxb_html_document_t* document, Page& page, JsRun
       page.fields.push_back(std::move(field));
     }
   }
-  project_content(
-      root, page,
-      {runtime, visible_refs, visible_labels, consumed_labels, suppressed_links, nodes, ignored,
-       [&](lxb_dom_node_t* node) {
-         if (hidden(node)) return std::vector<ContentBlock>{};
-         const int id = state.frame_tree->ensure(state, node);
-         auto* child = state.frame_tree->runtime(id);
-         if (!child) return std::vector<ContentBlock>{};
-         Page embedded;
-         embedded.url = child->script_context().history_source_url;
-         child->sync(embedded);
-         extract(child->script_context().dom.document, embedded, *child);
-         page.truncated = page.truncated || embedded.truncated;
-         auto append = [&](auto& destination, auto& source, std::size_t maximum) {
-           if (source.size() > maximum - std::min(maximum, destination.size()))
-             page.truncated = true;
-           const auto count =
-               std::min(source.size(), maximum - std::min(maximum, destination.size()));
-           destination.insert(destination.end(), std::make_move_iterator(source.begin()),
-                              std::make_move_iterator(source.begin() + count));
-         };
-         append(page.links, embedded.links, kMaxLinks);
-         append(page.buttons, embedded.buttons, kMaxButtons);
-         append(page.fields, embedded.fields, kMaxFormFields);
-         append(page.forms, embedded.forms, kMaxForms);
-         // A bounded observation must not advertise actions whose metadata
-         // could not be retained. Text remains readable at the shared limit.
-         std::set<std::string> retained;
-         for (const auto& link : page.links) retained.insert(link.ref);
-         for (const auto& button : page.buttons) retained.insert(button.ref);
-         for (const auto& field : page.fields) retained.insert(field.ref);
-         embedded.content.erase(std::remove_if(embedded.content.begin(), embedded.content.end(),
-                                               [&](const auto& block) {
-                                                 return !block.ref.empty() &&
-                                                        !retained.count(block.ref);
-                                               }),
-                                embedded.content.end());
-         const auto title = trim(attr(node, "title"));
-         if (!title.empty() && !embedded.content.empty())
-           embedded.content.insert(embedded.content.begin(), {"heading", truncate(title, 180), ""});
-         return std::move(embedded.content);
-       }});
+  auto embedded_content = [&](int id, const std::string& title) {
+    auto* child = state.frame_tree->runtime(id);
+    if (!child) return std::vector<ContentBlock>{};
+    Page embedded;
+    embedded.url = child->script_context().history_source_url;
+    child->sync(embedded);
+    extract(child->script_context().dom.document, embedded, *child);
+    page.truncated = page.truncated || embedded.truncated;
+    auto append = [&](auto& destination, auto& source, std::size_t maximum) {
+      if (source.size() > maximum - std::min(maximum, destination.size())) page.truncated = true;
+      const auto count = std::min(source.size(), maximum - std::min(maximum, destination.size()));
+      destination.insert(destination.end(), std::make_move_iterator(source.begin()),
+                         std::make_move_iterator(source.begin() + count));
+    };
+    append(page.links, embedded.links, kMaxLinks);
+    append(page.buttons, embedded.buttons, kMaxButtons);
+    append(page.fields, embedded.fields, kMaxFormFields);
+    append(page.forms, embedded.forms, kMaxForms);
+    // A bounded observation must not advertise actions whose metadata
+    // could not be retained. Text remains readable at the shared limit.
+    std::set<std::string> retained;
+    for (const auto& link : page.links) retained.insert(link.ref);
+    for (const auto& button : page.buttons) retained.insert(button.ref);
+    for (const auto& field : page.fields) retained.insert(field.ref);
+    embedded.content.erase(std::remove_if(embedded.content.begin(), embedded.content.end(),
+                                          [&](const auto& block) {
+                                            return !block.ref.empty() && !retained.count(block.ref);
+                                          }),
+                           embedded.content.end());
+    if (!title.empty() && !embedded.content.empty())
+      embedded.content.insert(embedded.content.begin(), {"heading", truncate(title, 180), ""});
+    return std::move(embedded.content);
+  };
+  project_content(modal ? modal : root, page,
+                  {runtime, visible_refs, visible_labels, consumed_labels, suppressed_links, nodes,
+                   ignored, [&](lxb_dom_node_t* node) {
+                     if (hidden(node)) return std::vector<ContentBlock>{};
+                     return embedded_content(state.frame_tree->ensure(state, node),
+                                             trim(attr(node, "title")));
+                   }});
+  // Auxiliary windows are separate browsing contexts, not hidden DOM frames.
+  // Expose their controls with normal refs so agents can operate sign-in flows.
+  if (!state.frame_id)
+    for (int id : state.frame_tree->popups()) {
+      auto* child = state.frame_tree->runtime(id);
+      if (!child) continue;
+      // A newly opened about:blank context is still a window, even before it
+      // acquires observable content. Do not make popup creation disappear.
+      auto content = embedded_content(id, "");
+      page.content.push_back(
+          {"heading", truncate("Window: " + child->script_context().history_source_url, 180), ""});
+      if (content.empty())
+        page.content.push_back({"text", "Window has no observable content yet.", ""});
+      page.content.insert(page.content.end(), std::make_move_iterator(content.begin()),
+                          std::make_move_iterator(content.end()));
+    }
 }
 }  // namespace webcli

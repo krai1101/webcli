@@ -86,7 +86,12 @@ void InstanceWorker::run(std::shared_ptr<OriginStorage> storage) {
           } catch (const CliError& error) {
             completed.status = 1;
             done = true;
-            render_error(out, waiting->request.json, error.code, error.what(), error.retryable);
+            // Close sets the cancellation token before this thread dequeues it.
+            // An in-flight wait must report the same cancellation as a queued one.
+            if (error.code == "REQUEST_CANCELLED" && cancelled_->load())
+              render_error(out, waiting->request.json, "WAIT_CANCELLED", "wait cancelled by close");
+            else
+              render_error(out, waiting->request.json, error.code, error.what(), error.retryable);
             (waiting->request.json ? completed.output : completed.error) = out.str();
           } catch (const std::exception& error) {
             completed.status = 1;

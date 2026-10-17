@@ -1,3 +1,4 @@
+#include "runtime/wasm/bindings.hpp"
 #include <chrono>
 
 #include "core/browser_identity.hpp"
@@ -14,6 +15,7 @@
 #include "runtime/intl/number_format_bindings.hpp"
 #include "runtime/intl/segmenter_bindings.hpp"
 #include "runtime/messaging/broadcast_channels.hpp"
+#include "runtime/messaging/message_ports.hpp"
 #include "runtime/navigation/history_clone_bindings.hpp"
 #include "runtime/network/blob_urls.hpp"
 #include "runtime/network/completion_delivery.hpp"
@@ -37,6 +39,7 @@ class WorkerRealm {
     state.errors = &errors;
     state.base_url = channel.base;
     state.security_origin = channel.origin;
+    state.secure_context = channel.secure_context;
     state.referrer_policy = channel.referrer_policy;
   }
   ~WorkerRealm() {
@@ -55,7 +58,9 @@ class WorkerRealm {
       }
       state.timers.clear();
       state.scheduler.clear();
+      state.ports.reset();
       state.broadcasts.reset();
+      shutdown_wasm(state);
       JS_FreeContext(state.context);
     }
     JS_SetHostPromiseRejectionTracker(state.runtime, nullptr, nullptr);
@@ -96,6 +101,7 @@ class WorkerRealm {
     install_segmenter_class(state.context);
     install_number_format_class(state.context);
     JsValueOwner global(state.context, JS_GetGlobalObject(state.context));
+    install_wasm_bindings(state.context, global.get());
     struct Binding {
       const char* name;
       JSCFunction* function;
@@ -103,6 +109,7 @@ class WorkerRealm {
     };
     const Binding bindings[] = {
         {"__webcliBroadcast", guarded_binding<js_broadcast_channel>, 3},
+        {"__webcliMessagePort", guarded_binding<js_message_port>, 3},
         {"__webcliWorker", guarded_binding<js_worker_access>, 4},
         {"__webcliURLParse", guarded_binding<js_url_parse>, 4},
         {"__webcliSegmenter", guarded_binding<js_segmenter>, 4},
@@ -137,6 +144,9 @@ class WorkerRealm {
     property("__webcliBrowserBrand", kBrowserBrand);
     property("__webcliBrowserMajorVersion", kBrowserMajorVersion);
     property("__webcliBrowserVersion", kBrowserVersion);
+    property("__webcliArchitecture", kBrowserArchitecture);
+    property("__webcliBitness", kBrowserBitness);
+    JS_SetPropertyStr(state.context, global.get(), "__webcliSecureContext", JS_NewBool(state.context, state.secure_context));
 #ifdef _WIN32
     property("__webcliPlatform", "Win32");
 #elif defined(__APPLE__)
@@ -217,6 +227,9 @@ void run_worker(WorkerChannel& channel) noexcept {
     if (!channel.source_supplied) {
       HttpRequest request;
       request.url = channel.url;
+      request.metadata_mode = "same-origin";
+      request.metadata_origin = channel.origin;
+      request.destination = "worker";
       request.allowed_origin = channel.origin;
       request.owner_cancelled = channel.stopped;
       request.referrer_policy = channel.referrer_policy;

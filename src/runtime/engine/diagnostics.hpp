@@ -11,4 +11,7 @@ void drain_timer_jobs(ScriptContext*);
 void promise_rejection_tracker(JSContext*, JSValueConst, JSValueConst, bool, void*) noexcept;
 void flush_promise_rejections(ScriptContext&) noexcept;
 void clear_promise_rejections(ScriptContext&) noexcept;
+void trace_runtime(ScriptContext&, const char* category, const std::string& message) noexcept;
+std::string diagnostic_url(const std::string&);
+JSValue js_trace_input_event(JSContext*, JSValueConst, int, JSValueConst*);
 }  // namespace webcli

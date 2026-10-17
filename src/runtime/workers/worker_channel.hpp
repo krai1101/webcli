@@ -24,6 +24,7 @@ struct WorkerChannel {
   std::thread thread;
   std::string url, base, origin, source, name, referrer_policy;
   bool source_supplied = false, module = false;
+  bool secure_context = false;
   void enqueue(bool to_worker, WorkerMessage message);
   void stop() noexcept;
   ~WorkerChannel() { stop(); }

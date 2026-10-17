@@ -59,10 +59,18 @@ bool deliver_resource_completion(ScriptContext& state, FetchJob& job) {
   JSValue value;
   try {
     auto response = job.future.get();
+    trace_runtime(
+        state, "network",
+        "complete #" + std::to_string(job.id) +
+            (response.opaque ? " opaque response" : " HTTP " + std::to_string(response.status)) +
+            " bytes=" + std::to_string(response.body.size()) + " " + job.diagnostic_request);
     if (job.script) state.modules->received_script(job.script_url, response);
     value = make_response(state.context, response, job);
   } catch (const std::exception& error) {
     const auto* failure = dynamic_cast<const CliError*>(&error);
+    trace_runtime(state, "network",
+                  "failed #" + std::to_string(job.id) + " " +
+                      (failure ? failure->code : "NATIVE_ERROR") + " " + job.diagnostic_request);
     const auto message = failure ? failure->code + ": " + error.what() : std::string(error.what());
     value = JS_NewError(state.context);
     if (!JS_IsException(value) &&

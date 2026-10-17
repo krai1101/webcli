@@ -1,3 +1,4 @@
+#include "runtime/wasm/bindings.hpp"
 #include "runtime/engine/native_bindings.hpp"
 
 #include "runtime/crypto/aes_gcm_bindings.hpp"
@@ -7,17 +8,17 @@
 #include "runtime/dom/component_tree.hpp"
 #include "runtime/dom/dom_bindings.hpp"
 #include "runtime/dom/html_parser.hpp"
-#include "runtime/dom/node_adoption.hpp"
 #include "runtime/dom/namespace_bindings.hpp"
+#include "runtime/dom/node_adoption.hpp"
 #include "runtime/engine/diagnostics.hpp"
 #include "runtime/engine/native_guard.hpp"
 #include "runtime/engine/script_context.hpp"
 #include "runtime/events/timers.hpp"
 #include "runtime/frames/frame_tree.hpp"
-#include "runtime/workers/worker_manager.hpp"
-#include "runtime/messaging/broadcast_channels.hpp"
 #include "runtime/intl/number_format_bindings.hpp"
 #include "runtime/intl/segmenter_bindings.hpp"
+#include "runtime/messaging/broadcast_channels.hpp"
+#include "runtime/messaging/message_ports.hpp"
 #include "runtime/navigation/history_bindings.hpp"
 #include "runtime/navigation/history_clone_bindings.hpp"
 #include "runtime/network/blob_urls.hpp"
@@ -28,9 +29,11 @@
 #include "runtime/scripts/parser_coordinator.hpp"
 #include "runtime/storage/indexed_db_bindings.hpp"
 #include "runtime/url/url_bindings.hpp"
+#include "runtime/workers/worker_manager.hpp"
 
 namespace webcli {
 void install_native_bindings(JSContext* context, JSValueConst global) {
+  install_wasm_bindings(context, global);
   install_segmenter_class(context);
   install_number_format_class(context);
   struct Binding {
@@ -40,6 +43,7 @@ void install_native_bindings(JSContext* context, JSValueConst global) {
   };
   const Binding bindings[] = {
       {"__webcliBroadcast", guarded_binding<js_broadcast_channel>, 3},
+      {"__webcliMessagePort", guarded_binding<js_message_port>, 3},
       {"__webcliWorker", guarded_binding<js_worker_access>, 4},
       {"__webcliFrameAccess", guarded_binding<js_frame_access>, 4},
       {"__webcliNumberFormat", guarded_binding<js_number_format>, 3},
@@ -56,6 +60,8 @@ void install_native_bindings(JSContext* context, JSValueConst global) {
       {"__webcliPopoverState", guarded_binding<js_popover_state>, 2},
       {"__webcliAdoptedStylesheet", guarded_binding<js_adopted_stylesheet>, 2},
       {"__webcliStyleInvalidate", guarded_binding<js_style_invalidate>, 0},
+      {"__webcliMediaMatches", guarded_binding<js_media_matches>, 1},
+      {"__webcliDialogState", guarded_binding<js_dialog_state>, 2},
       {"__webcliIsProxy", guarded_binding<js_is_proxy>, 1},
       {"__webcliCryptoDigest", guarded_binding<js_crypto_digest>, 2},
       {"__webcliCryptoAESGCM", guarded_binding<js_crypto_aes_gcm>, 6},
@@ -65,6 +71,7 @@ void install_native_bindings(JSContext* context, JSValueConst global) {
       {"__webcliRegisterBlobURL", guarded_binding<js_blob_url_register>, 2},
       {"__webcliRevokeBlobURL", guarded_binding<js_blob_url_revoke>, 1},
       {"__webcliReportError", guarded_binding<js_report_error>, 2},
+      {"__webcliTraceEvent", guarded_binding<js_trace_input_event>, 4},
       {"__webcliScriptKind", guarded_binding<js_native_script_kind>, 1},
       {"__webcliLoadImage", guarded_binding<js_native_image_load>, 1},
       {"__webcliLoadScript", guarded_binding<js_native_script_load>, 1},
@@ -73,6 +80,7 @@ void install_native_bindings(JSContext* context, JSValueConst global) {
       {"__webcliReferrerMeta", guarded_binding<js_process_referrer_meta>, 1},
       {"__webcliDocumentReferrer", guarded_binding<js_document_referrer>, 1},
       {"__webcliQueueNavigation", guarded_binding<js_queue_navigation>, 4},
+      {"__webcliFormOwner", guarded_binding<js_dom_form_owner>, 2},
       {"__webcliCancelFetch", guarded_binding<js_native_cancel_fetch>, 1},
       {"__webcliRandomBytes", guarded_binding<js_native_random_bytes>, 1},
       {"__webcliCookie", guarded_binding<js_native_cookie>, 2},

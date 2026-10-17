@@ -68,6 +68,8 @@ LoadedStylesheets load_visibility_stylesheets(lxb_dom_node_t* root, const std::s
           warning("stylesheet request quota exceeded: " + href);
         else {
           HttpRequest request;
+          request.metadata_mode = "no-cors";
+          request.destination = "style";
           request.owner_cancelled = cancelled;
           request.url = *url;
           request.cookie_origin = base;

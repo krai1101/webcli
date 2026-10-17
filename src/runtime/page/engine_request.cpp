@@ -21,6 +21,10 @@ const char* action_name(BrowserAction action) {
       return "keyboard";
     case BrowserAction::Wait:
       return "wait";
+    case BrowserAction::Back:
+      return "back";
+    case BrowserAction::Forward:
+      return "forward";
   }
   throw CliError("UNKNOWN_COMMAND", "invalid browsing action");
 }
@@ -28,12 +32,16 @@ void validate_engine_request(const EngineRequest& request) {
   action_name(request.action);
   if (request.timeout_ms == 0 || request.timeout_ms > 30000)
     throw CliError("INVALID_ARGUMENT", "timeout must be 1..30000 ms");
+  const bool history =
+      request.action == BrowserAction::Back || request.action == BrowserAction::Forward;
+  if (history && (!request.target.empty() || !request.value.empty()))
+    throw CliError("INVALID_ARGUMENT", "back/forward take no target or value");
   if (request.action != BrowserAction::Observe && request.action != BrowserAction::Wait &&
-      request.target.empty())
+      !history && request.target.empty())
     throw CliError("INVALID_ARGUMENT", "browsing action requires a target");
   if (request.action == BrowserAction::Keyboard && request.value != "Enter" &&
-      request.value != "Escape")
-    throw CliError("INVALID_KEY", "keyboard supports Enter and Escape only");
+      request.value != "Escape" && request.value != "Tab" && request.value != "Shift+Tab")
+    throw CliError("INVALID_KEY", "keyboard supports Enter, Escape, Tab and Shift+Tab");
   if (request.action == BrowserAction::Wait) {
     switch (request.condition) {
       case WaitCondition::Idle:

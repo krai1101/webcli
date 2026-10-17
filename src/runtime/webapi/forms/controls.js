@@ -1,4 +1,29 @@
 const __submittingForms = new WeakSet();
+// User text edits commit on blur/Enter. Keep the pre-edit value across repeated
+// fills, without making programmatic .value assignments emit change events.
+const __pendingTextEdits = new WeakMap();
+function __rememberTextEdit(node) {
+  if (!__pendingTextEdits.has(node)) __pendingTextEdits.set(node, node.value);
+}
+function __commitTextEdit(node) {
+  if (!node || !__pendingTextEdits.has(node)) return;
+  const previous = __pendingTextEdits.get(node);
+  __pendingTextEdits.delete(node);
+  if (node.isConnected && node.value !== previous)
+    __dispatchInputEvent(node, new Event('change', {bubbles: true}));
+}
+
+// Dialog forms complete locally, after the submit event has been accepted.
+// A submitter's formmethod takes precedence over the form's method.
+function __completeFormSubmission(form, button) {
+  const method = (button?.getAttribute('formmethod') ?? form.method).toLowerCase();
+  if (method === 'dialog') {
+    const dialog = form.closest('dialog');
+    if (dialog) dialog.close(button ? button.value : undefined);
+    return;
+  }
+  __webcliSubmission = {form: form.__id, button: button ? button.__id : -1};
+}
 __installDomMembers(class {
   get checked() {
     return this.hasAttribute('checked');
@@ -86,14 +111,7 @@ __installDomMembers(class {
       this.setAttribute('value', value);
   }
   get form() {
-    const id = this.getAttribute('form');
-    if (id !== null) {
-      const form = this.getRootNode().querySelectorAll('form[id]').find(node => node.id === id);
-      return form || null;
-    }
-    for (let n = this.parentNode; n; n = n.parentNode)
-      if (n.tagName === 'FORM') return n;
-    return null;
+    return __wrap(__webcliFormOwner(this.__id));
   }
   get elements() {
     return __formElements(this);
@@ -126,7 +144,7 @@ __installDomMembers(class {
   }
   submit() {
     if (this.tagName !== 'FORM') throw new TypeError('submit requires a form');
-    __webcliSubmission = {form: this.__id, button: -1};
+    __completeFormSubmission(this, null);
   }
   requestSubmit(button = null) {
     if (this.tagName !== 'FORM') throw new TypeError('requestSubmit requires a form');
@@ -140,15 +158,13 @@ __installDomMembers(class {
     try {
       if (!this.hasAttribute('novalidate') && !(button && button.hasAttribute('formnovalidate')) &&
           !this.checkValidity()) {
-        for (const field of this.elements)
-          if (!field.checkValidity()) field.dispatchEvent(new Event('invalid', {cancelable: true}));
         return;
       }
       const event = new SubmitEvent('submit', {
         bubbles: true, cancelable: true, submitter: button
       });
       if (__dispatchInputEvent(this, event))
-        __webcliSubmission = {form: this.__id, button: button ? button.__id : -1};
+        __completeFormSubmission(this, button);
     } finally {
       __submittingForms.delete(this);
     }

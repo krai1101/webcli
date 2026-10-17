@@ -52,6 +52,9 @@ class ExecutionBudget {
     if (expired()) interrupted_ = true;
     return interrupted_;
   }
+  Clock::time_point interrupt_deadline() const {
+    return window_ && *window_ < deadline_ ? *window_ : deadline_;
+  }
   bool interrupted() const { return interrupted_; }
   bool report_window_timeout() {
     if (window_reported_) return false;

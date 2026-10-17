@@ -81,23 +81,3 @@ globalThis.Image = function(width, height) {
   if (height !== undefined) image.setAttribute('height', height);
   return image;
 };
-
-// Dialogs expose state and events to agents without a visual top layer.
-class HTMLDialogElement extends Element {
-  constructor() {return document.createElement('dialog');}
-  static [Symbol.hasInstance](node) {return node instanceof DomNode && node.tagName === 'DIALOG';}
-}
-for (const [name, descriptor] of Object.entries({
-  open: {get() {return this.hasAttribute('open');}, set(value) {this.toggleAttribute('open', !!value);}},
-  returnValue: {get() {return this._dialogReturnValue || '';}, set(value) {this._dialogReturnValue = String(value);}},
-  closedBy: {get() {const value = this.getAttribute('closedby'); return ['any','closerequest','none'].includes(value) ? value : this._dialogModal ? 'closerequest' : 'none';},
-    set(value) {this.setAttribute('closedby', value);}},
-  show: {value: function() {if (this.tagName !== 'DIALOG') throw new TypeError('dialog required'); if (this.open && this._dialogModal) throw new Error('dialog is already modal'); this.open = true;}},
-  showModal: {value: function() {if (this.tagName !== 'DIALOG' || !this.isConnected) throw new Error('connected dialog required'); if (this.open && !this._dialogModal) throw new Error('dialog is already nonmodal'); this._dialogModal = true; this.open = true;}},
-  close: {value: function(value) {if (this.tagName !== 'DIALOG') throw new TypeError('dialog required'); if (!this.open) return; if (value !== undefined) this.returnValue = value; this.open = false; this._dialogModal = false; queueMicrotask(() => this.dispatchEvent(new Event('close')));}},
-  requestClose: {value: function(value) {if (this.open && this.dispatchEvent(new Event('cancel', {cancelable:true}))) this.close(value);}}
-})) {
-  Object.defineProperty(HTMLDialogElement.prototype, name, {...descriptor, configurable:true});
-}
-globalThis.HTMLDialogElement = HTMLDialogElement;
-for (const node of __cachedNodes()) if (node.tagName === 'DIALOG') Object.setPrototypeOf(node, HTMLDialogElement.prototype);

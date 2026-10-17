@@ -84,6 +84,9 @@ void StylesheetResources::scan(ScriptContext& state) {
         warning(state, resource->error);
       } else {
         HttpRequest request;
+        request.metadata_mode = "no-cors";
+        request.metadata_origin = state.opaque_origin ? "null" : state.security_origin;
+        request.destination = "style";
         request.owner_cancelled = state.cancelled;
         request.url = *url;
         request.cookie_origin = state.base_url;

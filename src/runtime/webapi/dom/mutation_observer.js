@@ -2,6 +2,8 @@ const __observers = new Set();
 let __mutationQueued = false;
 
 function __notify(target, type, extra = {}, rangeChange = null) {
+  if (type === 'attributes' && extra.attributeName?.toLowerCase() === 'form')
+    __webcliFormOwner(target.__id, true);
   if (typeof __prunePopovers === 'function') __prunePopovers();
   if (typeof __updateRanges === 'function') __updateRanges(target, type, extra, rangeChange);
   if (type === 'childList')
@@ -10,6 +12,12 @@ function __notify(target, type, extra = {}, rangeChange = null) {
            ['name', 'content'].includes(extra.attributeName?.toLowerCase()))
     __webcliReferrerMeta(target.__id);
   __webcliStyleInvalidate();
+  if (type === 'childList' && globalThis.__webcliRefreshFrameIndices) {
+    const hasFrame = node => node.nodeType === 1 &&
+        (node.tagName === 'IFRAME' || node.querySelector('iframe'));
+    if ([...(extra.addedNodes || []), ...(extra.removedNodes || [])].some(hasFrame))
+      globalThis.__webcliRefreshFrameIndices();
+  }
   globalThis.__webcliScheduleIntersectionChecks?.();
   if (typeof __slotMutation === 'function') __slotMutation(target, type, extra);
   for (const observer of __observers)

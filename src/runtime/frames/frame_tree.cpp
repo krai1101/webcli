@@ -4,6 +4,7 @@
 #include <future>
 #include <map>
 #include <sstream>
+#include <tuple>
 #include <vector>
 
 #include "core/errors.hpp"
@@ -17,6 +18,7 @@
 #include "runtime/dom/dom_bindings.hpp"
 #include "runtime/dom/dom_helpers.hpp"
 #include "runtime/engine/diagnostics.hpp"
+#include "runtime/engine/js_handles.hpp"
 #include "runtime/engine/js_runtime.hpp"
 #include "runtime/engine/script_context.hpp"
 #include "runtime/forms/form_submission.hpp"
@@ -61,6 +63,10 @@ struct FrameTree::Impl {
     std::unique_ptr<DocumentLifecycle::LoadBlocker> blocker;
     std::string signature, destination;
     bool dirty = true, initial = true, loading = false, scripts = true, opaque = false;
+    bool popup = false, closed = false, no_referrer = false;
+    int opener = -1;
+    std::string name;
+    std::string initial_origin, initial_base;
   };
   ScriptContext& root;
   FrameTree& tree;
@@ -69,11 +75,14 @@ struct FrameTree::Impl {
   std::map<int, std::uint64_t> scanned;
   int next_id = 0;
   std::uint64_t next_generation = 0;
+  using Observation = std::tuple<int, std::uint64_t, std::uint64_t, bool>;
+  std::vector<Observation> observed_frames;
+  std::uint64_t observation_epoch = 0;
   explicit Impl(ScriptContext& value, FrameTree& owner) : root(value), tree(owner) {}
   ScriptContext* state(int id) const {
     if (id == 0) return &root;
     const auto entry = frames.find(id);
-    return entry == frames.end() ? nullptr : entry->second->state;
+    return entry == frames.end() || entry->second->closed ? nullptr : entry->second->state;
   }
   std::vector<int> children(int id) const {
     auto* owner = state(id);
@@ -126,8 +135,11 @@ struct FrameTree::Impl {
     frame.page = {};
     frame.generation = ++next_generation;
     frame.page.url = url;
-    frame.page.document_referrer = request_referrer(owner->base_url, url, owner->referrer_policy);
-    frame.page.referrer_policy = element_referrer_policy(owner->referrer_policy, frame.element);
+    frame.page.document_referrer =
+        frame.no_referrer ? "" : request_referrer(owner->base_url, url, owner->referrer_policy);
+    frame.page.referrer_policy =
+        frame.no_referrer ? "no-referrer"
+                          : element_referrer_policy(owner->referrer_policy, frame.element);
     const auto document = new_document();
     trace.mark("allocate-document");
     lxb_html_document_scripting_set(document.get(), frame.scripts);
@@ -137,11 +149,11 @@ struct FrameTree::Impl {
                                  frame.id,
                                  document,
                                  frame.opaque ? "null"
-                                 : inherited  ? owner->security_origin
+                                 : inherited  ? (frame.popup ? frame.initial_origin : owner->security_origin)
                                               : url_origin(url),
-                                 inherited ? owner->base_url : url,
+                                 inherited ? (frame.popup ? frame.initial_base : owner->base_url) : url,
                                  frame.opaque || (inherited && owner->opaque_origin),
-                                 frame.scripts};
+                                 frame.scripts, frame.name};
     // No-script sandbox documents still get DOM bindings, but author scripts
     // are made inert before parsing by the parser's explicit scripting flag.
     frame.runtime = std::make_unique<JsRuntime>(
@@ -151,6 +163,10 @@ struct FrameTree::Impl {
     frame.loading = true;
   }
   void event(Frame& frame) {
+    if (frame.popup) {
+      frame.loading = false;
+      return;
+    }
     auto* owner = state(frame.parent);
     if (!owner) return;
     const int node = dom_node_id(owner, frame.element);
@@ -187,19 +203,94 @@ std::uint64_t FrameTree::generation(int id) const {
   return entry == impl_->frames.end() ? 0 : entry->second->generation;
 }
 std::uint64_t FrameTree::observation_revision() const {
-  // Frame identities and generations change on removal/navigation; DOM and
-  // style revisions change on mutation. Observe therefore includes child work.
-  std::uint64_t revision = impl_->next_generation;
+  // Compare exact frame identities and DOM versions, rather than hashing them:
+  // simultaneous frame updates must never cancel another frame's invalidation.
+  bool changed = impl_->observed_frames.size() != impl_->frames.size();
+  std::size_t index = 0;
   for (const auto& entry : impl_->frames) {
-    revision = revision * 1099511628211ULL ^ static_cast<unsigned>(entry.first);
-    if (entry.second->runtime)
-      revision = revision * 1099511628211ULL ^ entry.second->runtime->observation_revision();
+    const auto& frame = *entry.second;
+    const Impl::Observation value{entry.first, frame.generation,
+                                  frame.runtime ? frame.runtime->observation_revision() : 0,
+                                  frame.closed};
+    if (index >= impl_->observed_frames.size()) {
+      impl_->observed_frames.push_back(value);
+      changed = true;
+    } else if (impl_->observed_frames[index] != value) {
+      impl_->observed_frames[index] = value;
+      changed = true;
+    }
+    ++index;
   }
-  return revision;
+  impl_->observed_frames.resize(index);
+  if (changed) ++impl_->observation_epoch;
+  return impl_->observation_epoch;
 }
 int FrameTree::parent(int id) const {
   const auto entry = impl_->frames.find(id);
-  return entry == impl_->frames.end() ? 0 : entry->second->parent;
+  return entry == impl_->frames.end() ? 0 : entry->second->popup ? id : entry->second->parent;
+}
+int FrameTree::top(int id) const {
+  while (id && parent(id) != id) id = parent(id);
+  return id;
+}
+int FrameTree::opener(int id) const {
+  const auto entry = impl_->frames.find(id);
+  if (entry == impl_->frames.end() || !state(entry->second->opener)) return -1;
+  return entry->second->opener;
+}
+std::vector<int> FrameTree::popups() const {
+  std::vector<int> ids;
+  for (const auto& [id, frame] : impl_->frames)
+    if (frame->popup && !frame->closed) ids.push_back(id);
+  return ids;
+}
+int FrameTree::open_popup(ScriptContext& caller, const std::string& url, const std::string& name,
+                          bool no_opener, bool no_referrer) {
+  if (!caller.scripting_allowed || caller.opaque_origin)
+    throw CliError("POPUP_BLOCKED", "sandboxed documents cannot open auxiliary windows");
+  // Preserve containment until propagation of popup sandbox flags is supported.
+  for (int ancestor = caller.frame_id; ancestor; ancestor = parent(ancestor)) {
+    if (has_attr(element(ancestor), "sandbox"))
+      throw CliError("POPUP_BLOCKED", "sandboxed documents cannot open auxiliary windows");
+    if (parent(ancestor) == ancestor) break;
+  }
+  if (!no_opener && !name.empty() && ascii_lower(name) != "_blank")
+    for (const auto& [id, frame] : impl_->frames)
+      if (frame->popup && !frame->closed && frame->name == name &&
+          frame->opener == caller.frame_id) {
+        if (!url.empty()) navigate(id, url);
+        return id;
+      }
+  auto frame = std::make_unique<Impl::Frame>();
+  frame->id = ++impl_->next_id;
+  // Auxiliary contexts belong to the page lifetime but aren't child frames.
+  frame->parent = 0;
+  frame->popup = true;
+  frame->initial_origin = caller.security_origin;
+  frame->initial_base = caller.base_url;
+  frame->no_referrer = no_referrer;
+  frame->opener = no_opener ? -1 : caller.frame_id;
+  frame->name = ascii_lower(name) == "_blank" ? "" : name;
+  frame->dirty = frame->initial = false;
+  const int id = frame->id;
+  auto* value = frame.get();
+  impl_->frames.emplace(id, std::move(frame));
+  try {
+    impl_->commit(*value, "about:blank", "<!doctype html><html><head></head><body></body></html>");
+    value->loading = false;
+    if (!url.empty() && url != "about:blank") navigate(id, url);
+  } catch (...) {
+    impl_->remove(id);
+    throw;
+  }
+  return id;
+}
+void FrameTree::close_popup(int id) {
+  const auto entry = impl_->frames.find(id);
+  if (entry == impl_->frames.end() || !entry->second->popup) return;
+  entry->second->closed = true;
+  if (entry->second->transfer_cancel) entry->second->transfer_cancel->store(true);
+  // Defer teardown until the JavaScript callback has returned.
 }
 lxb_dom_node_t* FrameTree::element(int id) const {
   const auto entry = impl_->frames.find(id);
@@ -230,6 +321,7 @@ int FrameTree::ensure(ScriptContext& owner, lxb_dom_node_t* node) {
   auto* value = frame.get();
   impl_->frames.emplace(id, std::move(frame));
   impl_->nodes.emplace(key, id);
+  trace_runtime(owner, "frame", "attached iframe #" + std::to_string(id));
   try {
     impl_->commit(*value, "about:blank", "<!doctype html><html><head></head><body></body></html>");
     value->loading = false;
@@ -263,6 +355,18 @@ void FrameTree::scan(ScriptContext& owner) {
     if (tag_name(node) == "iframe") ensure(owner, node);
     for (auto* child = node->last_child; child; child = child->prev) pending.push_back(child);
   }
+  // Numeric Window access must exist before author code or a load handler reads
+  // window[0], without first requiring a read of window.length/window.frames.
+  const JsValueOwner global(owner.context, JS_GetGlobalObject(owner.context));
+  const JsValueOwner refresh(
+      owner.context, JS_GetPropertyStr(owner.context, global.get(), "__webcliRefreshFrameIndices"));
+  if (JS_IsFunction(owner.context, refresh.get())) {
+    JSValue size = JS_NewInt32(owner.context, count(owner.frame_id));
+    const JsValueOwner result(owner.context,
+                              JS_Call(owner.context, refresh.get(), global.get(), 1, &size));
+    JS_FreeValue(owner.context, size);
+    if (JS_IsException(result.get())) record_async_js_error(&owner, owner.context);
+  }
 }
 void FrameTree::navigate(int id, std::string url, std::string method, std::string body,
                          bool submission) {
@@ -284,6 +388,7 @@ void FrameTree::navigate(int id, std::string url, std::string method, std::strin
       auto* container = element(ancestor);
       if (has_attr(container, "sandbox") && !token(attr(container, "sandbox"), "allow-forms"))
         throw CliError("FRAME_BLOCKED", "sandbox forbids form submission");
+      if (parent(ancestor) == ancestor) break;
     }
   }
   frame.opaque = has_attr(frame.element, "sandbox") &&
@@ -295,7 +400,7 @@ void FrameTree::navigate(int id, std::string url, std::string method, std::strin
     throw CliError("FRAME_BLOCKED", "sandbox forbids form submission");
   frame.destination = std::move(url);
   frame.loading = true;
-  if (ascii_lower(attr(frame.element, "loading")) != "lazy" && !frame.blocker)
+  if (!frame.popup && ascii_lower(attr(frame.element, "loading")) != "lazy" && !frame.blocker)
     frame.blocker = owner->lifecycle.block_load();
   if (frame.destination == "about:srcdoc") {
     impl_->commit(frame, frame.destination, attr(frame.element, "srcdoc"));
@@ -307,16 +412,20 @@ void FrameTree::navigate(int id, std::string url, std::string method, std::strin
     return;
   }
   // Avoid recursive embedding of an ancestor's identical document URL.
-  for (int ancestor = frame.parent;; ancestor = parent(ancestor)) {
+  for (int ancestor = frame.parent; !frame.popup; ancestor = parent(ancestor)) {
     auto* context = state(ancestor);
     if (context && context->history_source_url == frame.destination) {
       impl_->event(frame);
       return;
     }
-    if (!ancestor) break;
+    if (!ancestor || parent(ancestor) == ancestor) break;
   }
   HttpRequest request;
   request.url = frame.destination;
+  request.metadata_mode = "navigate";
+  const auto* source = submission && frame.state ? frame.state : owner;
+  request.metadata_origin = source->opaque_origin ? "null" : source->security_origin;
+  request.destination = frame.popup ? "document" : "iframe";
   request.method = std::move(method);
   request.body = std::move(body);
   request.is_form_submission = submission;
@@ -325,8 +434,13 @@ void FrameTree::navigate(int id, std::string url, std::string method, std::strin
     request.headers.emplace("Content-Type", "application/x-www-form-urlencoded");
   request.owner_cancelled = impl_->root.cancelled;
   request.cancelled = frame.transfer_cancel = std::make_shared<std::atomic<bool>>(false);
-  request.referrer_source = owner->base_url;
-  request.referrer_policy = element_referrer_policy(owner->referrer_policy, frame.element);
+  request.referrer_source = source->base_url;
+  if (frame.no_referrer)
+    request.referrer_policy = "no-referrer";
+  else if (submission)
+    request.referrer_policy = source->referrer_policy;
+  else
+    request.referrer_policy = element_referrer_policy(owner->referrer_policy, frame.element);
   request.headers.emplace("Accept",
                           "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
   frame.transfer = resource_service().submit([request] { return perform_http(request); });
@@ -340,7 +454,7 @@ void FrameTree::pump() {
     if (found == impl_->frames.end()) continue;
     auto& frame = *found->second;
     auto* owner = state(frame.parent);
-    if (!owner || !connected(*owner, frame.element)) {
+    if (frame.closed || !owner || (!frame.popup && !connected(*owner, frame.element))) {
       impl_->remove(id);
       continue;
     }
@@ -348,7 +462,7 @@ void FrameTree::pump() {
       const std::string signature =
           attr(frame.element, "src") + '\0' +
           (has_attr(frame.element, "srcdoc") ? "1" + attr(frame.element, "srcdoc") : "0");
-      if (frame.dirty || signature != frame.signature) {
+      if (!frame.popup && (frame.dirty || signature != frame.signature)) {
         frame.signature = signature;
         frame.dirty = false;
         std::string destination = "about:blank";
@@ -358,6 +472,8 @@ void FrameTree::pump() {
           auto resolved = resolve_web_url(owner->base_url, attr(frame.element, "src"));
           if (resolved) destination = *resolved;
         }
+        trace_runtime(*owner, "frame", "load iframe #" + std::to_string(id) + " " +
+                                           diagnostic_url(destination));
         if (frame.initial && destination == "about:blank")
           frame.loading = true;
         else
@@ -368,13 +484,14 @@ void FrameTree::pump() {
           frame.transfer.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
         auto response = frame.transfer.get();
         std::vector<std::string> ancestors;
-        for (int ancestor = frame.parent;; ancestor = parent(ancestor)) {
+        for (int ancestor = frame.parent; !frame.popup; ancestor = parent(ancestor)) {
           auto* context = state(ancestor);
           ancestors.push_back(context && !context->opaque_origin ? context->security_origin
                                                                  : "null");
-          if (!ancestor) break;
+          if (!ancestor || parent(ancestor) == ancestor) break;
         }
-        if (!frame_response_allowed(response.headers, url_origin(response.url), ancestors))
+        if (!frame.popup &&
+            !frame_response_allowed(response.headers, url_origin(response.url), ancestors))
           throw CliError("FRAME_BLOCKED", "response forbids embedding");
         if (!is_html_content_type(response.content_type.c_str()) &&
             !is_plain_text_content_type(response.content_type))
@@ -420,6 +537,13 @@ bool FrameTree::pending() const {
   for (const auto& entry : impl_->frames)
     if (entry.second->dirty || entry.second->loading || entry.second->transfer.valid() ||
         (entry.second->runtime && entry.second->runtime->network_pending()))
+      return true;
+  return false;
+}
+bool FrameTree::ready_work_pending() const {
+  for (const auto& entry : impl_->frames)
+    if (!entry.second->closed && entry.second->runtime &&
+        entry.second->runtime->ready_work_pending())
       return true;
   return false;
 }

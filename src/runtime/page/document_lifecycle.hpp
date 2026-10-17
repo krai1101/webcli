@@ -51,6 +51,8 @@ class DocumentLifecycle {
     return true;
   }
   void abort() { aborted_ = true; }
+  bool load_completed() const { return load_dispatched_; }
+  bool aborted() const { return aborted_; }
 
  private:
   std::size_t pending_loads_ = 0;

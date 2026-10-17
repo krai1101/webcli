@@ -7,6 +7,9 @@
 #include "runtime/engine/script_context.hpp"
 
 namespace webcli {
+JSValue js_media_matches(JSContext* context, JSValueConst, int argc, JSValueConst* argv) {
+  return JS_NewBool(context, visibility_media_matches(argc ? js_string(context, argv[0]) : ""));
+}
 JSValue js_dom_revision(JSContext* context, JSValueConst, int, JSValueConst*) {
   return JS_NewInt64(
       context, static_cast<ScriptContext*>(JS_GetContextOpaque(context))->css.style_generation);
@@ -69,18 +72,35 @@ JSValue js_popover_state(JSContext* context, JSValueConst, int argc, JSValueCons
   if (!node) return JS_ThrowTypeError(context, "popover requires an element");
   auto& state = *static_cast<ScriptContext*>(JS_GetContextOpaque(context));
   if (argc > 1) {
-    if (JS_ToBool(context, argv[1])) state.dom.open_popovers.insert(node);
-    else state.dom.open_popovers.erase(node);
+    if (JS_ToBool(context, argv[1]))
+      state.dom.open_popovers.insert(node);
+    else
+      state.dom.open_popovers.erase(node);
     ++state.css.style_generation;
   }
   return JS_NewBool(context, state.dom.open_popovers.count(node) != 0);
+}
+JSValue js_dialog_state(JSContext* context, JSValueConst, int argc, JSValueConst* argv) {
+  auto* node = argc ? dom_node_arg(context, argv[0]) : nullptr;
+  if (!node || tag_name(node) != "dialog") return JS_ThrowTypeError(context, "dialog required");
+  auto& state = *static_cast<ScriptContext*>(JS_GetContextOpaque(context));
+  if (argc > 1) {
+    if (JS_ToBool(context, argv[1])) {
+      if (!state.dom.modal_dialogs.count(node))
+        state.dom.modal_dialogs.emplace(node, ++state.dom.modal_sequence);
+    } else
+      state.dom.modal_dialogs.erase(node);
+  }
+  return JS_NewBool(context, state.dom.modal_dialogs.count(node) != 0);
 }
 JSValue js_computed_visibility(JSContext* context, JSValueConst, int argc, JSValueConst* argv) {
   auto* node = argc ? dom_node_arg(context, argv[0]) : nullptr;
   if (!node) return JS_ThrowTypeError(context, "computed style requires a node");
   auto& state = *static_cast<ScriptContext*>(JS_GetContextOpaque(context));
   const auto& values = resolve_visibility(state);
-  if (argc > 1 && JS_ToBool(context, argv[1])) {
+  int32_t property = 0;
+  if (argc > 1 && JS_ToInt32(context, &property, argv[1]) < 0) return JS_EXCEPTION;
+  if (property == 1) {
     // Resolve inherited visibility over the same composed parents used by
     // observation, including slot and shadow-host inheritance.
     for (auto* ancestor = node; ancestor; ancestor = composed_parent(state, ancestor)) {
@@ -96,8 +116,7 @@ JSValue js_computed_visibility(JSContext* context, JSValueConst, int argc, JSVal
   const auto found = values.find(node);
   // A null result asks the JS interface to apply its default or inheritance.
   if (found == values.end()) return JS_NULL;
-  const int property = argc > 1 ? JS_ToBool(context, argv[1]) : 0;
-  const auto& value = property ? found->second.visibility : found->second.display;
+  const auto& value = property == 2 ? found->second.opacity : found->second.display;
   return value.empty() ? JS_NULL : JS_NewStringLen(context, value.data(), value.size());
 }
 JSValue js_style_invalidate(JSContext* context, JSValueConst, int, JSValueConst*) {

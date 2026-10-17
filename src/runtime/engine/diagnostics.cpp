@@ -3,9 +3,58 @@
 #include <algorithm>
 
 #include "core/text.hpp"
+#include "network/http_client.hpp"
 #include "runtime/dom/dom_helpers.hpp"
+#include "runtime/engine/js_handles.hpp"
 #include "runtime/engine/script_context.hpp"
 namespace webcli {
+void trace_runtime(ScriptContext& state, const char* category,
+                   const std::string& message) noexcept {
+  try {
+    // Retain recent metadata so observe --debug can diagnose earlier commands.
+    // This bounds diagnostic storage, not page execution or network requests.
+    if (state.diagnostic_trace.size() == 128) {
+      state.diagnostic_trace.pop_front();
+      ++state.diagnostic_dropped;
+    }
+    const auto elapsed = std::chrono::duration<double, std::milli>(
+                             std::chrono::steady_clock::now() - state.time_origin)
+                             .count();
+    state.diagnostic_trace.push_back({elapsed, category, message.substr(0, 300)});
+  } catch (...) {
+    // Diagnostics must never replace a page exception or break an interaction.
+  }
+}
+std::string diagnostic_url(const std::string& url) {
+  const auto scheme = url.find("://");
+  if (scheme == std::string::npos) {
+    const auto colon = url.find(':');
+    return colon == std::string::npos ? "non-http" : url.substr(0, colon + 1);
+  }
+  const auto start = url.find_first_of("/?#", scheme + 3);
+  const auto end = url.find_first_of("?#", start);
+  auto path =
+      start != std::string::npos && url[start] == '/' ? url.substr(start, end - start) : "/";
+  if (path.size() > 180) path = path.substr(0, 80) + "..." + path.substr(path.size() - 100);
+  return url_origin(url) + path;
+}
+JSValue js_trace_input_event(JSContext* context, JSValueConst, int argc, JSValueConst* argv) {
+  if (argc < 4) return JS_UNDEFINED;
+  const auto type = js_string(context, argv[0]);
+  if (type != "click" && type != "mousedown" && type != "mouseup" && type != "keydown" &&
+      type != "keyup" && type != "keypress" && type != "input" && type != "change" &&
+      type != "blocked-disabled" && type != "blocked-inert" && type != "submit" &&
+      type != "pointerdown" && type != "pointerup")
+    return JS_UNDEFINED;
+  int32_t node = 0, handlers = 0;
+  if (JS_ToInt32(context, &node, argv[1]) < 0 || JS_ToInt32(context, &handlers, argv[2]) < 0)
+    return JS_EXCEPTION;
+  auto& state = *static_cast<ScriptContext*>(JS_GetContextOpaque(context));
+  trace_runtime(state, "event",
+                type + " node=" + std::to_string(node) + " handlers=" + std::to_string(handlers) +
+                    " prevented=" + (JS_ToBool(context, argv[3]) > 0 ? "true" : "false"));
+  return JS_UNDEFINED;
+}
 namespace {
 // Interrupt diagnostics must not call a page-defined getter or toString while
 // the execution deadline is expired. QuickJS errors carry an own string stack.
@@ -33,9 +82,12 @@ std::string interrupted_stack(JSContext* context, JSValueConst exception) {
 }
 }  // namespace
 bool begin_js_task(ScriptContext* state) noexcept {
-  JS_SetInterruptHandler(state->runtime,[](JSRuntime*,void* opaque) -> int {
-    return static_cast<ExecutionBudget*>(opaque)->interrupt();
-  },&state->execution);
+  JS_SetInterruptHandler(
+      state->runtime,
+      [](JSRuntime*, void* opaque) -> int {
+        return static_cast<ExecutionBudget*>(opaque)->interrupt();
+      },
+      &state->execution);
   if (state->execution.begin_task()) return true;
   try {
     if (!state->execution.cancelled() && state->execution.report_window_timeout() &&
@@ -114,7 +166,8 @@ void drain_timer_jobs(ScriptContext* state) {
     const int result = JS_ExecutePendingJob(state->runtime, &job_context);
     if (result <= 0) {
       if (result < 0 && job_context)
-        record_async_js_error(static_cast<ScriptContext*>(JS_GetContextOpaque(job_context)), job_context);
+        record_async_js_error(static_cast<ScriptContext*>(JS_GetContextOpaque(job_context)),
+                              job_context);
       return;
     }
   }

@@ -27,7 +27,7 @@ class Event {
     this.currentTarget = null;
     this.eventPhase = 0;
     this._immediate = false;
-    this.timeStamp = Date.now();
+    this.timeStamp = __webcliNow();
   }
   get type() {
     return __eventStates.get(this).type;
@@ -185,6 +185,7 @@ class EventTarget {
   _invoke(event, capture) {
     event.currentTarget = this;
     const call = callback => {
+      __eventStates.get(event).handlers++;
       try {
         return callback();
       } catch (error) {
@@ -237,6 +238,7 @@ function __dispatchBrowserEvent(event, trusted) {
   if (event._dispatching || !event.type)
     throw new DOMException('Invalid event dispatch', 'InvalidStateError');
   __eventStates.get(event).trusted = trusted;
+  __eventStates.get(event).handlers = 0;
   event._dispatching = true;
   event.cancelBubble = false;
   event._immediate = false;
@@ -295,6 +297,11 @@ function __dispatchBrowserEvent(event, trusted) {
     event.eventPhase = 0;
     event.currentTarget = null;
     event._dispatching = false;
+    try {
+      if (trusted && typeof __webcliTraceEvent === 'function')
+        __webcliTraceEvent(event.type, origin.__id ?? -1,
+          __eventStates.get(event).handlers, event.defaultPrevented);
+    } catch {}
   }
 }
 function __dispatchInputEvent(target, event) {

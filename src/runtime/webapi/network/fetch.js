@@ -199,6 +199,10 @@ globalThis.fetch = function(input, init) {
         __abortEngine.throwIfAborted(request.signal);
       }
       if (body.bytes !== null) body.used = true;
+      if (request.url.startsWith('data:')) {
+        try { resolve(__dataURLResponse(request)); } catch (error) { reject(error); }
+        return;
+      }
       if (request.url.startsWith('blob:')) {
         if (request.method !== 'GET') {
           reject(new TypeError('Blob fetch requires GET'));

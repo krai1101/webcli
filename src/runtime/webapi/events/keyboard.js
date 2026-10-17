@@ -29,13 +29,19 @@ globalThis.KeyboardEvent = KeyboardEvent;
 function __keyboard(node, name) {
   const codes = {
     Enter: 13,
-    Escape: 27
+    Escape: 27,
+    Tab: 9,
+    'Shift+Tab': 9
   };
   if (!Object.hasOwn(codes, name)) throw new TypeError('unsupported keyboard key');
+  const modal = __topNativeDialog();
+  if (modal && !__insideFocusScope(node, modal)) return;
   node.focus();
-  const send = type => node.dispatchEvent(new KeyboardEvent(type, {
-    key: name,
-    code: name,
+  const key = name === 'Shift+Tab' ? 'Tab' : name;
+  const send = (type, target = node) => __dispatchInputEvent(target, new KeyboardEvent(type, {
+    key,
+    code: key,
+    shiftKey: name === 'Shift+Tab',
     keyCode: codes[name],
     charCode: type === 'keypress' ? codes[name] : 0,
     bubbles: true,
@@ -43,7 +49,13 @@ function __keyboard(node, name) {
     composed: true
   }));
   const accepted = send('keydown') && (name !== 'Enter' || send('keypress'));
+  if (accepted && key === 'Tab') __tabInDialog(name === 'Shift+Tab');
+  if (accepted && name === 'Escape') {
+    const dialog = node.closest('dialog[open]');
+    if (dialog?._dialogModal && dialog.closedBy !== 'none') dialog.requestClose();
+  }
   if (accepted && name === 'Enter') {
+    if (node.tagName === 'INPUT') __commitTextEdit(node);
     if (node.tagName === 'A' || node.tagName === 'BUTTON' ||
       node.tagName === 'INPUT' && ['submit', 'button', 'reset'].includes(node.type)) node.click();
     else if (node.tagName === 'INPUT' && node.form) {
@@ -61,5 +73,5 @@ function __keyboard(node, name) {
       }
     }
   }
-  send('keyup');
+  send('keyup', key === 'Tab' ? document.activeElement || node : node);
 }

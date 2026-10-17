@@ -4,7 +4,9 @@
 #include "runtime/css/visibility_rules.hpp"
 
 namespace webcli {
+JSValue js_media_matches(JSContext*, JSValueConst, int, JSValueConst*);
 JSValue js_popover_state(JSContext*, JSValueConst, int, JSValueConst*);
+JSValue js_dialog_state(JSContext*, JSValueConst, int, JSValueConst*);
 JSValue js_dom_revision(JSContext*, JSValueConst, int, JSValueConst*);
 struct ScriptContext;
 const VisibilityValues& resolve_visibility(ScriptContext&);

@@ -14,6 +14,50 @@
 #include "runtime/engine/script_context.hpp"
 
 namespace webcli {
+lxb_dom_node_t* form_owner(ScriptContext& state, lxb_dom_node_t* node) {
+  if (!node) return nullptr;
+  auto* root = node;
+  while (root->parent) root = root->parent;
+  if (has_attr(node, "form")) {
+    const auto id = attr(node, "form");
+    if (id.empty()) return nullptr;
+    std::vector<lxb_dom_node_t*> stack{root};
+    while (!stack.empty()) {
+      auto* candidate = stack.back();
+      stack.pop_back();
+      if (has_attr(candidate, "id") && attr(candidate, "id") == id)
+        return tag_name(candidate) == "form" ? candidate : nullptr;
+      for (auto* child = candidate->last_child; child; child = child->prev) stack.push_back(child);
+    }
+    return nullptr;
+  }
+  const auto parsed = state.dom.parser_form_owners.find(node);
+  if (parsed != state.dom.parser_form_owners.end()) {
+    auto* owner_root = parsed->second;
+    while (owner_root->parent) owner_root = owner_root->parent;
+    if (root == owner_root) return parsed->second;
+  }
+  for (auto* parent = node->parent; parent; parent = parent->parent)
+    if (tag_name(parent) == "form") return parent;
+  return nullptr;
+}
+void reset_parser_form_owners(ScriptContext& state, lxb_dom_node_t* subtree) {
+  const auto inside = [subtree](lxb_dom_node_t* node) {
+    for (; node; node = node->parent)
+      if (node == subtree) return true;
+    return false;
+  };
+  for (auto it = state.dom.parser_form_owners.begin(); it != state.dom.parser_form_owners.end();)
+    if (inside(it->first) || inside(it->second)) it = state.dom.parser_form_owners.erase(it);
+    else ++it;
+}
+JSValue js_dom_form_owner(JSContext* context, JSValueConst, int argc, JSValueConst* argv) {
+  auto& state = *static_cast<ScriptContext*>(JS_GetContextOpaque(context));
+  auto* node = argc ? dom_node_arg(context, argv[0]) : nullptr;
+  if (argc > 1 && JS_ToBool(context, argv[1]) > 0)
+    state.dom.parser_form_owners.erase(node);
+  return JS_NewInt32(context, dom_node_id(&state, form_owner(state, node)));
+}
 std::string textarea_control_value(ScriptContext& state, lxb_dom_node_t* node) {
   const auto stored = state.dom.textarea_values.find(node);
   auto value = stored == state.dom.textarea_values.end() ? node_text(node) : stored->second;

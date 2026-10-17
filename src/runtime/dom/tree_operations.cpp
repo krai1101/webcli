@@ -96,6 +96,7 @@ JSValue js_dom_append(JSContext* context, JSValueConst, int argc, JSValueConst* 
     return JS_ThrowTypeError(context, "cannot append this DOM node");
   auto& state = *static_cast<ScriptContext*>(JS_GetContextOpaque(context));
   child = adopt_native_tree(state, child, parent->owner_document);
+  reset_parser_form_owners(state, child);
   if (lxb_dom_node_append_child(parent, child) != LXB_DOM_EXCEPTION_OK)
     return JS_ThrowTypeError(context, "cannot append this DOM node");
   return JS_DupValue(context, argv[1]);
@@ -105,6 +106,7 @@ JSValue js_dom_remove(JSContext* context, JSValueConst, int argc, JSValueConst* 
   if (argc < 1) return JS_ThrowTypeError(context, "node id is required");
   auto* node = dom_node_arg(context, argv[0]);
   if (!node) return JS_ThrowTypeError(context, "invalid DOM node");
+  reset_parser_form_owners(*static_cast<ScriptContext*>(JS_GetContextOpaque(context)), node);
   lxb_dom_node_remove(node);
   return JS_UNDEFINED;
 }
@@ -122,6 +124,7 @@ JSValue js_dom_insert(JSContext* context, JSValueConst, int argc, JSValueConst* 
     return JS_ThrowTypeError(context, "invalid insertBefore operation");
   auto& state = *static_cast<ScriptContext*>(JS_GetContextOpaque(context));
   child = adopt_native_tree(state, child, parent->owner_document);
+  reset_parser_form_owners(state, child);
   if (lxb_dom_node_insert_before_spec(parent, child, before) != LXB_DOM_EXCEPTION_OK)
     return JS_ThrowTypeError(context, "invalid insertBefore operation");
   return JS_UNDEFINED;

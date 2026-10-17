@@ -1,4 +1,5 @@
 #include "network/http_client.hpp"
+#include "network/fetch_metadata.hpp"
 
 #include <curl/curl.h>
 
@@ -126,13 +127,14 @@ static HttpResponse perform_http_transfer(const HttpRequest& request, bool& requ
   // Erase case variants so a supplied header cannot produce conflicting brands.
   for (auto it = request_headers.begin(); it != request_headers.end();) {
     const auto name = lower(it->first);
-    if (name == "sec-ch-ua" || name == "sec-ch-ua-full-version-list")
+    if (name == "sec-ch-ua" || name == "sec-ch-ua-full-version-list" || name.rfind("sec-fetch-", 0) == 0)
       it = request_headers.erase(it);
     else
       ++it;
   }
   auto referrer_source = request.referrer_source;
   auto referrer_policy = request.referrer_policy;
+  int site_relationship = -2;
   auto cookies = profile_cookies();
   // Eligibility belongs to the original request: a POST redirected to GET must
   // not accidentally gain permission to repeat a submission workflow.
@@ -153,6 +155,16 @@ static HttpResponse perform_http_transfer(const HttpRequest& request, bool& requ
     }
     if (!request.fetch_origin.empty() && (cross || (method != "GET" && method != "HEAD")))
       request_headers["origin"] = request.fetch_origin;
+    // Native navigation POSTs carry the document origin without becoming CORS
+    // fetches. A redirect rewritten to GET must drop our synthesized Origin.
+    if (request.fetch_origin.empty() && request.metadata_mode == "navigate" &&
+        !request.metadata_origin.empty()) {
+      for (auto it = request_headers.begin(); it != request_headers.end();)
+        if (lower(it->first) == "origin") it = request_headers.erase(it);
+        else ++it;
+      if (method != "GET" && method != "HEAD")
+        request_headers["Origin"] = request.metadata_origin;
+    }
     const bool use_cookies =
         request.use_cookies && cookies &&
         (request.cookie_origin.empty() || same_origin(request.cookie_origin, target));
@@ -229,6 +241,8 @@ static HttpResponse perform_http_transfer(const HttpRequest& request, bool& requ
     // and must not cause a preflight, including after redirects.
     append_header("Sec-Ch-Ua", kClientHintBrand);
     append_header("Sec-Ch-Ua-Full-Version-List", kClientHintFullVersion);
+    for (const auto& pair : fetch_metadata_headers(request, target, site_relationship))
+      append_header(pair.first, pair.second);
     curl_easy_setopt(c, CURLOPT_HTTPHEADER, headers.get());
     const auto code = curl_easy_perform(c);
     // Request size is conservative evidence that dispatch may have happened,
@@ -411,6 +425,9 @@ std::string fetch_script(const std::string& url, long timeout_ms,
   if (is_data_script_url(url)) return decode_data_script(url);
   HttpRequest request;
   request.url = url;
+  request.metadata_mode = "no-cors";
+  request.metadata_origin = cookie_origin;
+  request.destination = "script";
   request.timeout_ms = timeout_ms;
   request.max_body_bytes = kMaxScriptBytes;
   request.cookie_origin = cookie_origin;

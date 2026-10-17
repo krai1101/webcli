@@ -433,6 +433,7 @@ Response send_request(const Request& request) {
       // The old worker explicitly rejected this request before enqueueing it.
       // Reconnect during shutdown; never replay an uncertain action.
       spawned = false;
+      if (Clock::now() >= deadline) break;
     } else {
       if (result.written)
         throw CliError(
@@ -455,7 +456,9 @@ Response send_request(const Request& request) {
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
     result = exchange(path, request);
-  } while (Clock::now() < deadline);
+    // Handle a completed response (or an uncertain dispatched action) before
+    // applying the startup deadline. Page loading can outlast worker startup.
+  } while (result.code == 0 || result.written || Clock::now() < deadline);
   throw CliError("WORKER_START_FAILED",
                  "browser worker did not become available within ten seconds", true);
 }
