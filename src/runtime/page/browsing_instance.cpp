@@ -363,7 +363,7 @@ void BrowsingInstance::transitions(unsigned depth) {
   if (current_ != source) return;
   if (navigation) {
     navigate(navigation->url, "GET", "", navigation->replace, false,
-             navigation->reload ? current_->navigation_referrer.get() : &navigation->referrer);
+             navigation->reload ? current_->navigation_referrer.get() : &navigation->initiator.referrer);
     transitions(depth + 1);
     return;
   }
@@ -412,8 +412,7 @@ void BrowsingInstance::wait_after_click(Clock::time_point deadline) {
     const auto& lifecycle = document->js->script_context().lifecycle;
     if (lifecycle.aborted())
       throw CliError("LOAD_ABORTED", "loading after click was aborted; the click was already dispatched; use observe before acting again");
-    if (!lifecycle.load_completed() || document->js->network_pending() ||
-        document->js->ready_work_pending())
+    if (!lifecycle.load_completed() || document->js->network_pending())
       idle_since = now;
     else if (now - idle_since >= std::chrono::milliseconds(kNetworkIdleWindowMs)) {
       auto& state = document->js->script_context();
@@ -477,7 +476,7 @@ const Page* BrowsingInstance::advance_wait(WaitOperation& operation) {
   snapshot();
   bool ready = false;
   if (operation.mode == WaitCondition::Idle) {
-    if (current_->js->network_pending() || current_->js->ready_work_pending())
+    if (current_->js->network_pending())
       operation.idle_since = Clock::now();
     ready = Clock::now() - operation.idle_since >= std::chrono::milliseconds(kNetworkIdleWindowMs);
   } else if (operation.mode == WaitCondition::Text)
@@ -515,15 +514,8 @@ const Page& BrowsingInstance::execute(const EngineRequest& request) {
   const auto observed_document = current_;
   const auto action_deadline = Clock::now() + std::chrono::milliseconds(kNavigationLoadTimeoutMs);
   tick();
-  if (request.action != BrowserAction::Observe && request.action != BrowserAction::Wait) {
-    // Resolve the target after runnable page work, so hydration cannot replace
-    // a control halfway through an otherwise synchronous agent interaction.
-    while (current_ == observed_document && current_->js->ready_work_pending()) {
-      if (Clock::now() >= action_deadline)
-        throw CliError("WAIT_TIMEOUT", "page still has runnable work; action was not dispatched", true);
-      tick();
-    }
-  }
+  // One event-loop turn and its microtask checkpoint precede target resolution.
+  // Recurring page tasks must not prevent an agent action from being dispatched.
   snapshot();
   if (!request.document.empty() && request.document != current_->page.document_id)
     throw CliError("STALE_DOCUMENT", "document changed; observe before acting");

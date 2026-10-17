@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.21)
 if(POLICY CMP0207)
   cmake_policy(SET CMP0207 NEW)
 endif()
-project(webcli VERSION 0.1.2 LANGUAGES C CXX)
+project(webcli VERSION 0.1.3 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -121,6 +121,7 @@ add_executable(webcli
   src/network/http_handles.cpp
   src/network/data_script.cpp
   src/cli/output/format.cpp
+  src/cli/installation.cpp
   src/observation/semantic_extractor.cpp
   src/observation/reference_resolver.cpp
   src/observation/accessible_name.cpp
@@ -129,6 +130,7 @@ add_executable(webcli
   src/storage/diagnostic_log.cpp
 )
 include(cmake/WebApiSources.cmake)
+include(cmake/InstallationScripts.cmake)
 
 # Opt-in harness for unchanged upstream tests. Never enabled in release builds.
 option(WEBCLI_UPSTREAM_TEST_DRIVER "Build the upstream test driver instead of the CLI" OFF)

@@ -2,6 +2,7 @@
 #include <iostream>
 
 #include "cli/commands.hpp"
+#include "cli/installation.hpp"
 #include "cli/output/format.hpp"
 #include "cli/terminal.hpp"
 #include "core/errors.hpp"
@@ -58,6 +59,9 @@ int run_prompt(const Request& startup) {
         show_help(std::cout);
         continue;
       }
+      if (installation_command(request))
+        throw CliError("TERMINAL_COMMAND", "leave this prompt with quit, then run webcli " +
+                                               request.command + " from your terminal");
       auto response = send_request(request);
       std::cout << response.output;
       std::cerr << response.error;

@@ -57,7 +57,21 @@ irm https://raw.githubusercontent.com/krai1101/webcli/main/scripts/install.ps1 |
 ```
 
 The installers verify the release checksum and install under your user account.
-On Linux/macOS, open a new terminal afterward. Run the same command to update.
+On Linux/macOS, open a new terminal afterward.
+
+For installations made with these scripts, run from your terminal:
+
+```sh
+webcli update
+webcli uninstall
+```
+
+Updates verify the release checksum and switch to the latest stable version.
+Open a new terminal afterward on Windows to refresh PATH. Uninstall keeps saved
+cookies and storage. Windows removes WebCLI's installation entries from your
+user PATH; Linux/macOS remove its executable link and keep the shared
+`~/.local/bin` PATH configuration. Extracted ZIPs and source builds must be
+updated or removed manually. Quit running WebCLI prompts before uninstalling.
 
 Windows x64, Linux x64 and macOS Apple Silicon ZIP packages are published on the
 [Releases page](https://github.com/krai1101/webcli/releases) after all three
@@ -112,16 +126,14 @@ Internal processing and failed waits preserve the last returned reference
 descriptions. A successful observation replaces them; use its current refs.
 Reference numbers are not reused across navigation within a live instance.
 
-`click` waits for document load and 500 ms without pending network or runnable
-JavaScript work before
+`click` waits for document load and 500 ms without pending network work before
 returning page text. The idle window follows Lightpanda and agent-browser;
 automatic waiting after clicks is WebCLI's CLI behavior. The total readiness
 deadline is 25 seconds. A timeout does not undo or retry the click; use `observe`
 before acting again. Pages can schedule later updates or poll indefinitely, so
 use `wait text "expected text"` when a workflow requires a specific result.
-Interactions resolve their targets after already-runnable page tasks finish;
-this avoids filling a control that queued hydration is about to replace. Future
-timers and unresolved promises do not block this check.
+Interactions process an event-loop turn before resolving their targets.
+Recurring JavaScript tasks do not block action dispatch or reset network idle.
 
 References identify links (`L1`), buttons (`B1`), inputs (`I1`) and selects
 (`S1`). Use the references returned by the current page. Follow the displayed

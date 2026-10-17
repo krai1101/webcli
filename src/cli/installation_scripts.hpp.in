@@ -1,0 +1,5 @@
+#pragma once
+namespace webcli {
+inline constexpr unsigned char kInstallerScript[] = {@WEBCLI_INSTALL_BYTES@};
+inline constexpr unsigned char kMaintenanceScript[] = {@WEBCLI_MAINTENANCE_BYTES@};
+}  // namespace webcli

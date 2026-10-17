@@ -10,6 +10,7 @@
 namespace webcli {
 struct ScriptContext;
 class JsRuntime;
+struct NavigationInitiator;
 struct FrameEnvironment {
   ScriptContext* parent = nullptr;
   class FrameTree* tree = nullptr;
@@ -35,7 +36,6 @@ class FrameTree {
   void pump();
   void cancel_workers();
   bool pending() const;
-  bool ready_work_pending() const;
   bool matches(const std::string& selector) const;
   ScriptContext* state(int) const;
   JsRuntime* runtime(int) const;
@@ -52,7 +52,7 @@ class FrameTree {
   int child(int, int) const;
   int count(int) const;
   void navigate(int, std::string, std::string method = "GET", std::string body = "",
-                bool submission = false);
+                bool submission = false, const NavigationInitiator* initiator = nullptr);
 
  private:
   struct Impl;

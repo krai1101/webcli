@@ -6,6 +6,7 @@
 
 #include "cli/commands.hpp"
 #include "cli/instance.hpp"
+#include "cli/installation.hpp"
 #include "cli/output/format.hpp"
 #include "core/errors.hpp"
 #include "core/runtime_policy.hpp"
@@ -81,6 +82,7 @@ int main(int argc, char** argv) {
       webcli::show_help(std::cout);
       return 0;
     }
+    if (webcli::installation_command(request)) return webcli::manage_installation(request);
     request.instance = webcli::automatic_instance(request.command.empty());
     if (request.command.empty()) return webcli::run_prompt(request);
     const auto response = webcli::send_request(request);

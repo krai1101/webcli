@@ -3,6 +3,11 @@ set -euo pipefail
 
 main() {
 fail() { printf 'WebCLI: %s\n' "$*" >&2; exit 1; }
+current_version=''
+if [[ $# -gt 0 ]]; then
+  [[ $# -eq 2 && "$1" == --current-version && "$2" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail 'Invalid installer arguments.'
+  current_version=$2
+fi
 for tool in curl unzip mktemp awk grep; do
   command -v "$tool" >/dev/null 2>&1 || fail "Install $tool first."
 done
@@ -25,6 +30,13 @@ latest=$(curl --fail --silent --show-error --location --proto '=https' \
   --proto-redir '=https' --output /dev/null --write-out '%{url_effective}' "$repository/releases/latest")
 tag=${latest##*/}
 [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail 'No public stable release found.'
+if [[ -n "$current_version" ]] && awk -v current="$current_version" -v latest="${tag#v}" 'BEGIN {
+  split(current,c,"."); split(latest,l,".");
+  for(i=1;i<=3;i++){if(c[i]+0>l[i]+0)exit 0;if(c[i]+0<l[i]+0)exit 1} exit 0
+}'; then
+  printf 'WebCLI %s is already up to date.\n' "$current_version"
+  exit 0
+fi
 asset="webcli-$tag-$platform.zip"
 work=$(mktemp -d)
 trap 'rm -rf -- "$work"' EXIT

@@ -121,7 +121,8 @@ struct FrameTree::Impl {
     scanned.erase(id);
     frames.erase(found);
   }
-  void commit(Frame& frame, std::string url, std::string html) {
+  void commit(Frame& frame, std::string url, std::string html,
+              const HttpResponse* response = nullptr) {
     LoadTrace trace("frame");
     auto* owner = state(frame.parent);
     if (!owner) return;
@@ -135,11 +136,19 @@ struct FrameTree::Impl {
     frame.page = {};
     frame.generation = ++next_generation;
     frame.page.url = url;
-    frame.page.document_referrer =
-        frame.no_referrer ? "" : request_referrer(owner->base_url, url, owner->referrer_policy);
+    frame.page.document_referrer = response ? response->request_referrer
+        : frame.no_referrer ? ""
+        : request_referrer(frame.popup ? frame.initial_base : owner->base_url, url,
+                           owner->referrer_policy);
     frame.page.referrer_policy =
         frame.no_referrer ? "no-referrer"
                           : element_referrer_policy(owner->referrer_policy, frame.element);
+    if (response) {
+      frame.page.referrer_policy.clear();
+      if (const auto policy = response->headers.find("referrer-policy");
+          policy != response->headers.end())
+        frame.page.referrer_policy = response_referrer_policy(policy->second, "");
+    }
     const auto document = new_document();
     trace.mark("allocate-document");
     lxb_html_document_scripting_set(document.get(), frame.scripts);
@@ -254,11 +263,13 @@ int FrameTree::open_popup(ScriptContext& caller, const std::string& url, const s
       throw CliError("POPUP_BLOCKED", "sandboxed documents cannot open auxiliary windows");
     if (parent(ancestor) == ancestor) break;
   }
+  const NavigationInitiator initiator{caller.opaque_origin ? "null" : caller.security_origin,
+                                      {caller.base_url, caller.referrer_policy}};
   if (!no_opener && !name.empty() && ascii_lower(name) != "_blank")
     for (const auto& [id, frame] : impl_->frames)
       if (frame->popup && !frame->closed && frame->name == name &&
           frame->opener == caller.frame_id) {
-        if (!url.empty()) navigate(id, url);
+        if (!url.empty()) navigate(id, url, "GET", "", false, &initiator);
         return id;
       }
   auto frame = std::make_unique<Impl::Frame>();
@@ -278,7 +289,8 @@ int FrameTree::open_popup(ScriptContext& caller, const std::string& url, const s
   try {
     impl_->commit(*value, "about:blank", "<!doctype html><html><head></head><body></body></html>");
     value->loading = false;
-    if (!url.empty() && url != "about:blank") navigate(id, url);
+    if (!url.empty() && url != "about:blank")
+      navigate(id, url, "GET", "", false, &initiator);
   } catch (...) {
     impl_->remove(id);
     throw;
@@ -369,7 +381,7 @@ void FrameTree::scan(ScriptContext& owner) {
   }
 }
 void FrameTree::navigate(int id, std::string url, std::string method, std::string body,
-                         bool submission) {
+                         bool submission, const NavigationInitiator* initiator) {
   const auto found = impl_->frames.find(id);
   if (found == impl_->frames.end()) return;
   auto& frame = *found->second;
@@ -423,8 +435,9 @@ void FrameTree::navigate(int id, std::string url, std::string method, std::strin
   HttpRequest request;
   request.url = frame.destination;
   request.metadata_mode = "navigate";
-  const auto* source = submission && frame.state ? frame.state : owner;
-  request.metadata_origin = source->opaque_origin ? "null" : source->security_origin;
+  const auto* source = (submission || frame.popup) && frame.state ? frame.state : owner;
+  request.metadata_origin = initiator ? initiator->origin
+      : source->opaque_origin ? "null" : source->security_origin;
   request.destination = frame.popup ? "document" : "iframe";
   request.method = std::move(method);
   request.body = std::move(body);
@@ -434,10 +447,12 @@ void FrameTree::navigate(int id, std::string url, std::string method, std::strin
     request.headers.emplace("Content-Type", "application/x-www-form-urlencoded");
   request.owner_cancelled = impl_->root.cancelled;
   request.cancelled = frame.transfer_cancel = std::make_shared<std::atomic<bool>>(false);
-  request.referrer_source = source->base_url;
+  request.referrer_source = initiator ? initiator->referrer.source : source->base_url;
   if (frame.no_referrer)
     request.referrer_policy = "no-referrer";
-  else if (submission)
+  else if (initiator)
+    request.referrer_policy = initiator->referrer.policy;
+  else if (submission || frame.popup)
     request.referrer_policy = source->referrer_policy;
   else
     request.referrer_policy = element_referrer_policy(owner->referrer_policy, frame.element);
@@ -499,7 +514,7 @@ void FrameTree::pump() {
         auto html = is_plain_text_content_type(response.content_type)
                         ? plain_text_document(response.body)
                         : std::move(response.body);
-        impl_->commit(frame, response.url, std::move(html));
+        impl_->commit(frame, response.url, std::move(html), &response);
       }
       if (frame.runtime) {
         frame.runtime->pump();
@@ -509,7 +524,7 @@ void FrameTree::pump() {
         }
         frame.runtime->sync(frame.page);
         if (auto next = frame.runtime->take_navigation())
-          navigate(id, next->url);
+          navigate(id, next->url, "GET", "", false, &next->initiator);
         else {
           const auto submission = frame.runtime->take_submission();
           if (submission.first >= 0) {
@@ -537,13 +552,6 @@ bool FrameTree::pending() const {
   for (const auto& entry : impl_->frames)
     if (entry.second->dirty || entry.second->loading || entry.second->transfer.valid() ||
         (entry.second->runtime && entry.second->runtime->network_pending()))
-      return true;
-  return false;
-}
-bool FrameTree::ready_work_pending() const {
-  for (const auto& entry : impl_->frames)
-    if (!entry.second->closed && entry.second->runtime &&
-        entry.second->runtime->ready_work_pending())
       return true;
   return false;
 }

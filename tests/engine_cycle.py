@@ -26,6 +26,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     hydrate_release = threading.Event()
     hydrate_done = threading.Event()
     fill_loads = 0
+    popup_requests = []
     def do_POST(self):
         self.rfile.read(int(self.headers.get('Content-Length',0)))
         Handler.origin_requests.append((self.command,self.path,self.headers.get('Origin')))
@@ -33,6 +34,26 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_response(302);self.send_header('Location','/origin-result');self.end_headers();return
         self.send_response(200);self.send_header('Content-Type','text/html');self.end_headers();self.wfile.write(b'<body>POST_ORIGIN_READY</body>')
     def do_GET(self):
+        if self.path == '/popup-initiator':
+            child='http://localhost:'+str(self.server.server_port)+'/popup-origin-child'
+            body='<body>ROOT_PAGE<iframe src="'+child+'"></iframe></body>'
+            self.send_response(200);self.send_header('Content-Type','text/html');self.end_headers();self.wfile.write(body.encode());return
+        if self.path == '/popup-origin-child':
+            body='''<body><button onclick="window.open('/popup-origin-check','origin-check')">Create source popup</button></body>'''
+            self.send_response(200);self.send_header('Content-Type','text/html');self.end_headers();self.wfile.write(body.encode());return
+        if self.path in ('/popup-origin-check','/popup-origin-next'):
+            Handler.popup_requests.append((self.path,self.headers.get('Referer'),self.headers.get('Sec-Fetch-Site')))
+            body='''<body><p id=source></p><a href=/popup-origin-next>Popup next</a>
+<script>document.getElementById('source').textContent='POPUP_REFERRER='+JSON.stringify(document.referrer)</script></body>'''
+            self.send_response(200);self.send_header('Content-Type','text/html');self.send_header('Referrer-Policy','no-referrer');self.end_headers();self.wfile.write(body.encode());return
+        if self.path == '/nonmodal-sibling':
+            body='''<body><p>VISIBLE_BACKGROUND</p><div aria-hidden=true>DECORATION</div>
+<div role=dialog><p>NONMODAL_CONTENT</p><button>Dialog action</button></div></body>'''
+            self.send_response(200);self.send_header('Content-Type','text/html');self.end_headers();self.wfile.write(body.encode());return
+        if self.path == '/recurring-task':
+            body='''<body><input aria-label=Editable><button onclick="document.getElementById('result').textContent='CLICK_DISPATCHED'">Act</button><p id=result></p>
+<script>function repeat(){setTimeout(repeat,0)}repeat()</script></body>'''
+            self.send_response(200);self.send_header('Content-Type','text/html');self.end_headers();self.wfile.write(body.encode());return
         if self.path == '/indexed-frame-child':
             body='<body>INDEXED_CHILD_READY</body>'
             self.send_response(200);self.send_header('Content-Type','text/html');self.end_headers();self.wfile.write(body.encode());return
@@ -207,6 +228,28 @@ def run(terminal, *args):
     assert r.returncode == 0, page
     return page
 try:
+    page=run(a,'open',url+'/recurring-task')
+    page=run(a,'fill',page['fields'][0]['ref'],'ready')
+    assert page['fields'][0]['value']=='ready',page
+    page=run(a,'click',page['buttons'][0]['ref'])
+    assert 'CLICK_DISPATCHED' in page['text'],page
+    page=run(a,'wait','idle','--timeout','3000')
+    assert 'CLICK_DISPATCHED' in page['text'],page
+    print('PASS recurring tasks: fill/click dispatch and network idle do not require an empty task queue',flush=True)
+    page=run(a,'open',url+'/nonmodal-sibling')
+    assert 'VISIBLE_BACKGROUND' in page['text'] and 'NONMODAL_CONTENT' in page['text'],page
+    assert 'DECORATION' not in page['text'],page
+    print('PASS nonmodal dialog: hidden sibling does not suppress visible background',flush=True)
+    page=run(a,'open',url+'/popup-initiator')
+    page=run(a,'click',next(item['ref'] for item in page['buttons'] if item['name']=='Create source popup'))
+    child_origin='http://localhost:'+str(server.server_port)
+    expected_source=child_origin+'/popup-origin-child'
+    assert Handler.popup_requests==[('/popup-origin-check',expected_source,'same-origin')],Handler.popup_requests
+    assert 'POPUP_REFERRER='+json.dumps(expected_source) in page['text'],page
+    page=run(a,'click',next(item['ref'] for item in page['links'] if item['name']=='Popup next'))
+    assert Handler.popup_requests[-1]==('/popup-origin-next',None,'same-origin'),Handler.popup_requests
+    assert 'POPUP_REFERRER=""' in page['text'],page
+    print('PASS popup initiator: iframe source, request metadata, document.referrer and response policy',flush=True)
     page=run(a,'open',url+'/indexed-frames')
     page=run(a,'wait','text','INDEXED_PARENT_READ:INDEXED_CHILD_READY','--timeout','3000')
     assert 'INDEXED_PARSER_READY' in page['text'] and not page['scriptErrors'],page
@@ -335,9 +378,11 @@ try:
     print('PASS native form Origin, redirect removal and cross-origin frame source',flush=True)
     queued = run(a, 'open', url+'/queued-modal')
     queued = run(a, 'click', queued['buttons'][0]['ref'])
-    assert 'QUEUED_MODAL_READY' in queued['text'], 'Click returned while runnable tasks remained'
+    # Network idle does not imply completion of a chain of timer-only UI updates.
+    queued = run(a, 'wait', 'text', 'QUEUED_MODAL_READY', '--timeout', '3000')
+    assert 'QUEUED_MODAL_READY' in queued['text'], queued
     assert any(item['name'] == 'Close queued modal' for item in queued['buttons']), queued
-    print('PASS click readiness: queued UI work completes before observation', flush=True)
+    print('PASS explicit readiness: queued UI work completes before the requested text wait returns', flush=True)
     modal = run(a, 'open', url+'/modals')
     document = modal['documentId']
     assert all(text not in modal['text'] for text in ('NATIVE_MODAL','CUSTOM_MODAL','POPOVER_CONTENT')), modal

@@ -20,7 +20,9 @@ const std::vector<CommandSpec>& command_specs() {
       {"wait", "wait [idle|text|gone|ref|selector] [value]",
        "Wait for a condition; bounded by --timeout", 0, 2},
       {"close", "close", "Close this browsing instance; keep cookies/localStorage", 0, 0},
-      {"help", "help", "Show commands and options", 0, 0}};
+      {"help", "help", "Show commands and options", 0, 0},
+      {"update", "update", "Update a script-managed installation to the latest stable release", 0, 0},
+      {"uninstall", "uninstall", "Remove a script-managed installation; keep saved browsing data", 0, 0}};
   return specs;
 }
 namespace {
@@ -180,6 +182,7 @@ void show_help(std::ostream& out) {
   out << "Browsing commands:\n";
   for (const auto& spec : command_specs()) {
     if (std::string(spec.name) == "close") out << "\nUtilities:\n";
+    if (std::string(spec.name) == "update") out << "\nInstallation (run from your terminal):\n";
     out << "  " << spec.syntax << "\n      " << spec.description << "\n";
   }
   out << "\nOptions (terminal and prompt):\n"

@@ -74,19 +74,20 @@ JSValue js_queue_navigation(JSContext* context, JSValueConst, int argc, JSValueC
   const JsValueOwner global(context, JS_GetGlobalObject(context));
   NavigationAction action;
   action.url = *target;
+  action.initiator.origin = state.opaque_origin ? "null" : state.security_origin;
   action.replace = JS_ToBool(context, argv[1]) > 0;
   action.reload = JS_ToBool(context, argv[2]) > 0;
-  action.referrer.source =
+  action.initiator.referrer.source =
       property_string(context, global.get(), "__webcliCurrentURL", state.base_url);
-  action.referrer.policy = state.referrer_policy;
+  action.initiator.referrer.policy = state.referrer_policy;
   if (argc > 3) {
     auto* anchor = dom_node_arg(context, argv[3]);
     if (anchor && anchor->ns == LXB_NS_HTML && tag_name(anchor) == "a") {
-      action.referrer.policy = element_referrer_policy(state.referrer_policy, anchor);
+      action.initiator.referrer.policy = element_referrer_policy(state.referrer_policy, anchor);
       std::istringstream rel(ascii_lower(attr(anchor, "rel")));
       std::string token;
       while (rel >> token)
-        if (token == "noreferrer") action.referrer.policy = "no-referrer";
+        if (token == "noreferrer") action.initiator.referrer.policy = "no-referrer";
     }
   }
   state.navigation = std::move(action);

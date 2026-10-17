@@ -375,12 +375,6 @@ bool JsRuntime::network_pending() const {
          impl_->state.modules->has_pending_sources() ||
          (impl_->state.frame_id == 0 && impl_->state.frame_tree->pending());
 }
-bool JsRuntime::ready_work_pending() const {
-  impl_->state.require_owner();
-  const auto& state = impl_->state;
-  return state.scheduler.has_ready() || JS_IsJobPending(state.runtime) ||
-         (state.frame_id == 0 && state.frame_tree->ready_work_pending());
-}
 std::pair<bool, std::string> JsRuntime::select_value(lxb_dom_node_t* node) {
   impl_->state.require_owner();
   return selected_control_value(impl_->state, node);

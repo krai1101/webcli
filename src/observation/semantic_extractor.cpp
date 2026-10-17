@@ -127,6 +127,7 @@ void SemanticExtractor::extract(lxb_html_document_t* document, Page& page, JsRun
     return value;
   };
   lxb_dom_node_t* modal = nullptr;
+  lxb_dom_node_t* dialog_surface = nullptr;
   bool restrict_to_modal = false;
   auto hidden = [&](lxb_dom_node_t* node) {
     if (restrict_to_modal) {
@@ -139,23 +140,8 @@ void SemanticExtractor::extract(lxb_html_document_t* document, Page& page, JsRun
       if (ignored(parent) || ignored_subtree(parent, false, true)) return true;
     return stylesheet_invisible(node, visibility, composed_parent);
   };
-  // aria-modal identifies custom dialogs; native modal state is tracked
-  // separately because an ordinary dialog.show() does not block its page.
-  const auto concealed_background = [&](lxb_dom_node_t* dialog) {
-    // Some dialog libraries signal modality by excluding surrounding content
-    // from accessibility, rather than setting aria-modal on the dialog itself.
-    for (auto* branch = dialog; branch; branch = runtime.composed_parent(branch)) {
-      auto* parent = runtime.composed_parent(branch);
-      if (!parent) break;
-      for (auto* sibling : runtime.composed_children(parent)) {
-        const auto tag = tag_name(sibling);
-        if (sibling == branch || tag.empty() || tag == "svg" || tag == "script" || tag == "style")
-          continue;
-        if (has_attr(sibling, "inert") || attr(sibling, "aria-hidden") == "true") return true;
-      }
-    }
-    return false;
-  };
+  // Only explicit modality suppresses otherwise observable background content.
+  // Hidden/inert siblings are excluded individually; they do not make a dialog modal.
   std::uint64_t native_order = 0;
   for (auto* node : nodes) {
     if (hidden(node)) continue;
@@ -165,23 +151,21 @@ void SemanticExtractor::extract(lxb_html_document_t* document, Page& page, JsRun
         native_order = native->second;
         modal = node;
       }
-    } else if (!native_order &&
-               (attr(node, "role") == "dialog" || attr(node, "role") == "alertdialog") &&
-               (attr(node, "aria-modal") == "true" ||
-                (attr(node, "aria-modal") != "false" && concealed_background(node)))) {
-      modal = node;
+    } else if (attr(node, "role") == "dialog" || attr(node, "role") == "alertdialog") {
+      dialog_surface = node;
+      if (!native_order && attr(node, "aria-modal") == "true") modal = node;
     }
   }
-  if (modal) {
-    restrict_to_modal = true;
+  restrict_to_modal = modal != nullptr;
+  if (auto* outside_target = modal ? modal : dialog_surface) {
     Button outside;
     outside.label = "Outside dialog";
     outside.type = "button";
-    outside.node_id = runtime.node_id(modal);
+    outside.node_id = runtime.node_id(outside_target);
     outside.frame_id = state.frame_id;
     outside.ref = reference(outside.node_id, 'B');
     outside.outside_modal = true;
-    page.content.push_back({"heading", "Modal", ""});
+    page.content.push_back({"heading", modal ? "Modal" : "Dialog", ""});
     page.content.push_back({"button", outside.label, outside.ref});
     page.buttons.push_back(std::move(outside));
   }

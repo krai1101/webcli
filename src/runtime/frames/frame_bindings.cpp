@@ -198,7 +198,8 @@ JSValue js_frame_access(JSContext* context, JSValueConst, int argc, JSValueConst
     if (!url) return JS_ThrowTypeError(context, "invalid frame URL");
     NavigationAction action;
     action.url = *url;
-    action.referrer = {caller.base_url, caller.referrer_policy};
+    action.initiator = {caller.opaque_origin ? "null" : caller.security_origin,
+                        {caller.base_url, caller.referrer_policy}};
     target->navigation = std::move(action);
     return JS_UNDEFINED;
   }

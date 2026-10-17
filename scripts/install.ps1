@@ -1,3 +1,4 @@
+param([string]$CurrentVersion = '')
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
@@ -12,6 +13,10 @@ $repository = 'https://github.com/krai1101/webcli'
 $release = Invoke-RestMethod 'https://api.github.com/repos/krai1101/webcli/releases/latest'
 $tag = $release.tag_name
 if ($tag -notmatch '^v\d+\.\d+\.\d+$') { throw 'No public stable release found.' }
+if ($CurrentVersion -and [version]$CurrentVersion -ge [version]$tag.Substring(1)) {
+    Write-Host "WebCLI $CurrentVersion is already up to date."
+    exit 0
+}
 $asset = "webcli-$tag-windows-x64.zip"
 $work = Join-Path ([IO.Path]::GetTempPath()) ('webcli-install-' + [Guid]::NewGuid())
 [IO.Directory]::CreateDirectory($work) | Out-Null
